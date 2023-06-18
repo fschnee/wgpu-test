@@ -5,7 +5,7 @@ project(
     default_options: [ 'warning_level=3', 'cpp_std=c++20' ]
 )
 
-sources = ['src/main.cpp']
+sources = ['src/main.cpp', 'src/webgpu.cpp']
 dependencies = meson.is_cross_build() ? [dependency('wgpu-cpp')] : [
     dependency('wgpu-cpp'),
     dependency('wgpu-native'),

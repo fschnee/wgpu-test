@@ -1,13 +1,8 @@
 #include <iostream>
 
-#include <webgpu/webgpu.h>
+#include "webgpu.hpp"
 
-#define WEBGPU_CPP_IMPLEMENTATION
-#ifdef __EMSCRIPTEN__
-    #include <wgpu-cpp/emscripten/webgpu.hpp>
-#else
-    #include <wgpu-cpp/wgpu-native/webgpu.hpp>
-
+#ifndef __EMSCRIPTEN__
     #include <GLFW/glfw3.h>
     #include <glfw3webgpu.h>
 #endif
