@@ -1,0 +1,1 @@
+Requires c++20, meson and rust/cargo.

@@ -1,0 +1,4 @@
+[wrap-git]
+url = https://github.com/eliemichel/WebGPU-Cpp
+revision = 18be503d7b8ffcdc8ca68d51bd582e1ee8738cd0
+patch_directory = wgpu-cpp
