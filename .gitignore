@@ -1,9 +1,3 @@
 .vscode
-
 build/
-
-subprojects/wgpu-cpp
-subprojects/wgpu-native
-subprojects/glfw-3.3.8
-subprojects/glfw3webgpu
-subprojects/packagecache
+3rdparty/

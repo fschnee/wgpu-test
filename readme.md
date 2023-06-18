@@ -1,1 +1,1 @@
-Requires c++20, meson and rust/cargo.
+Requires c++20, meson and (rust/cargo on native builds).

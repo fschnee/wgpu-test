@@ -5,9 +5,10 @@
 if ! command -v emcc &> /dev/null
 then
     if [ ! -d "3rdparty/emsdk" ]
+    then
         mkdir -p 3rdparty/emsdk
         git clone https://github.com/emscripten-core/emsdk 3rdparty/emsdk
-    then
+    fi
 
     cd 3rdparty/emsdk
         ./emsdk install latest
@@ -16,11 +17,11 @@ then
     cd ../..
 fi
 
-# TODO: Build proper.
+# Build proper.
 
-if [ ! -d "build" ]
+if [ ! -d "build/wasm" ]
 then
-    meson setup build
+    meson setup build/wasm --cross-file wasm.ini
 fi
 
-meson compile -C build
+meson compile -C build/wasm --verbose

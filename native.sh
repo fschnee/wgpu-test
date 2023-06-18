@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 
-if [ ! -d "build" ]
+if [ ! -d "build/native" ]
 then
-    meson setup build
+    meson setup build/native
 fi
 
-meson compile -C build && ./build/main "$@"
+meson compile -C build/native && ./build/native/main "$@"
