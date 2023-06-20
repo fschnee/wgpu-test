@@ -15,7 +15,18 @@
             if(init_successful) glfwTerminate();
         }
 
-        auto loop(auto fn) { while (!glfwWindowShouldClose(window)) { glfwPollEvents(); fn(); } }
+        enum class loop_message {do_break, do_continue};
+
+        auto loop(auto fn)
+        {
+            while (!glfwWindowShouldClose(window))
+            {
+                glfwPollEvents();
+                int width, height;
+                glfwGetWindowSize(window, &width, &height);
+                if(fn(width, height) == loop_message::do_break) break;
+            }
+        }
     };
 
 #else
@@ -31,6 +42,7 @@ auto init_context() -> context
     #ifndef __EMSCRIPTEN__
         if (!glfwInit()) return {};
 
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // We'll use webgpu and not whatever it wants to try to set default.
         auto window = glfwCreateWindow(640, 480, "wgpu-test", nullptr, nullptr);
 
