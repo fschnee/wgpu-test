@@ -1,46 +1,31 @@
-#include <iostream>
+#include <cstdio>
 
 #include "webgpu.hpp"
+#include "context.hpp"
 
-#ifndef __EMSCRIPTEN__
-    #include <GLFW/glfw3.h>
-    #include <glfw3webgpu.h>
+#ifdef __EMSCRIPTEN__
+    #define IS_NATIVE false
+    #define PANIC_ON(cond, msg)
+#else
+    #define IS_NATIVE true
+    #define PANIC_ON(cond, msg) if(cond) { std::printf(msg); return 1; }
 #endif
-
-#include "standalone/dont_forget.hpp"
 
 int main()
 {
-    #ifndef __EMSCRIPTEN__
-        if (!glfwInit())
-        {
-            std::cerr << "Could not initialize GLFW!" << std::endl;
-            return 1;
-        }
-        STANDALONE_DONT_FORGET( glfwTerminate() );
+    auto context = init_context();
+    PANIC_ON(!context.init_successful, "Could not initialize GLFW!\n");
+    PANIC_ON(!context.window,          "Could not open window!\n");
 
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // We'll use webgpu and not whatever it wants to try to set default.
-        auto window = glfwCreateWindow(640, 480, "Learn WebGPU", NULL, NULL);
-        if (!window)
-        {
-            std::cerr << "Could not open window!" << std::endl;
-            return 1;
-        }
-        STANDALONE_DONT_FORGET( glfwDestroyWindow(window) );
-    #endif
+    auto instance = wgpu::Instance{nullptr};
+    if constexpr(IS_NATIVE) { instance = wgpu::createInstance({}); }
 
-    #ifdef __EMSCRIPTEN__
-        auto instance = wgpu::Instance{nullptr};
-    #else
-        auto instance = wgpu::createInstance({});
-    #endif
     auto adapter = instance.requestAdapter({});
-    if(adapter) std::cout << "Adapter created successfully" << std::endl;
-    else        std::cerr << "Failed creating adapter" << std::endl;
+    PANIC_ON(!adapter, "Failed creating adapter\n");
 
-    #ifndef __EMSCRIPTEN__
-        while (!glfwWindowShouldClose(window)) { glfwPollEvents(); }
-    #endif
+    context.loop([&]{
+
+    });
 
     return 0;
 }
