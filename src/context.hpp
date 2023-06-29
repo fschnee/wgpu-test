@@ -1,53 +1,42 @@
 #pragma once
 
-#ifndef __EMSCRIPTEN__
-    #include <GLFW/glfw3.h>
-    #include <glfw3webgpu.h>
+#include "webgpu.hpp"
 
-    struct context
+#include <GLFW/glfw3.h>
+
+#include "standalone/aliases.hpp"
+
+struct context
+{
+    bool init_successful       = false;
+    GLFWwindow* window         = nullptr;
+    bool imgui_init_successful = false;
+    bool new_resolution        = false;
+
+    standalone::u64 frame = 0;
+
+    ~context();
+
+    auto imgui_new_frame() -> void;
+    auto imgui_render(WGPURenderPassEncoder) -> void;
+
+    auto init_glfw() -> context&;
+    auto init_imgui(WGPUDevice, WGPUTextureFormat swapchainformat, WGPUTextureFormat depthbufferformat = WGPUTextureFormat_Undefined) -> context&;
+
+    auto notify_new_resolution() -> context&;
+
+    enum class loop_message {do_break, do_continue};
+
+    auto loop(auto fn)
     {
-        bool init_successful = false;
-        GLFWwindow* window   = nullptr;
-
-        ~context()
-        {
-            if(window)          glfwDestroyWindow(window);
-            if(init_successful) glfwTerminate();
-        }
-
-        enum class loop_message {do_break, do_continue};
-
-        auto loop(auto fn)
-        {
+        #ifndef __EMSCRIPTEN__
             while (!glfwWindowShouldClose(window))
             {
                 glfwPollEvents();
-                int width, height;
-                glfwGetWindowSize(window, &width, &height);
-                if(fn(width, height) == loop_message::do_break) break;
+                if(fn() == loop_message::do_break) break;
             }
-        }
-    };
-
-#else
-
-    struct context {
-        auto loop(auto fn) { while(true); }
-    }; // TODO: create context on emscripten and implement loop.
-
-#endif
-
-auto init_context() -> context
-{
-    #ifndef __EMSCRIPTEN__
-        if (!glfwInit()) return {};
-
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // We'll use webgpu and not whatever it wants to try to set default.
-        auto window = glfwCreateWindow(640, 480, "wgpu-test", nullptr, nullptr);
-
-        return { .init_successful = true, .window = window };
-    #else
-        return {};
-    #endif
-}
+        #else
+            while(true) fn(); // TODO: implement loop.
+        #endif
+    }
+};

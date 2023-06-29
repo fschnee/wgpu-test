@@ -56,5 +56,3 @@ namespace standalone::inline integer_aliases
         constexpr auto operator""_i64(unsigned long long val) { return static_cast<i64>(val); }
     };
 }
-
-namespace s = standalone;

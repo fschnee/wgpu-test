@@ -1,10 +1,14 @@
 #include <cstdio>
+#include <glfw3webgpu.h>
+#include <imgui.h>
+#include <fmt/core.h>
 
 #include "webgpu.hpp"
 #include "context.hpp"
 
 #include "standalone/dont_forget.hpp"
 #include "standalone/aliases.hpp"
+#include "standalone/chrono.hpp"
 
 #ifdef __EMSCRIPTEN__
     #define IS_NATIVE false
@@ -20,7 +24,8 @@
 
 int main()
 {
-    auto context = init_context();
+    auto context = ::context{};
+    context.init_glfw();
     PANIC_ON(!context.init_successful, "Could not initialize GLFW!\n");
     PANIC_ON(!context.window,          "Could not open window!\n");
 
@@ -42,7 +47,7 @@ int main()
 
     auto device = adapter.requestDevice({{
         .nextInChain = nullptr,
-        .label = "wgpu-test-device",
+        .label = "wgpui32{-t}est-device",
         .requiredFeaturesCount = 0,
         .requiredFeatures = nullptr,
         .requiredLimits = nullptr,
@@ -52,19 +57,25 @@ int main()
 
     auto queue = device.getQueue();
 
-    using namespace s::integer_aliases;
+    using namespace standalone::integer_aliases;
     auto w = 640_u32;
     auto h = 480_u32;
+    auto nw = i32{w}; // Update these to change resolution, used later.
+    auto nh = i32{h};
+    auto swapchainformat = surface.getPreferredFormat(adapter);
     auto swapchain = device.createSwapChain(surface, {{
         .nextInChain = nullptr,
         .label = "wgpu-test-swapchain",
         .usage = wgpu::TextureUsage::RenderAttachment,
-        .format = surface.getPreferredFormat(adapter),
+        .format = swapchainformat,
         .width = w,
         .height = h,
         .presentMode = wgpu::PresentMode::Fifo,
     }});
     DONT_FORGET(swapchain.drop());
+
+    context.init_imgui(device, swapchainformat);
+    PANIC_ON(!context.imgui_init_successful, "Could not init ImGui!\n");
 
     auto shader_wgsl_desc = WGPUShaderModuleWGSLDescriptor{
         .chain = {.next = nullptr, .sType = wgpu::SType::ShaderModuleWGSLDescriptor},
@@ -154,12 +165,25 @@ int main()
         .fragment = &fragment_state
     }});
 
-    context.loop([&](u32 new_w, u32 new_h)
+    auto stopwatch = standalone::chrono::stopwatch{};
+    context.loop([&]()
     {
-        if(new_w != w || new_h != h)
+        auto dt = stopwatch.since_click();
+        stopwatch.click();
+
+        auto glfwnw = 0;
+        auto glfwnh = 0;
+        glfwGetFramebufferSize(context.window, &glfwnw, &glfwnh);
+        if(glfwnw != w || glfwnh != h) // If glfw want us to change resolution (maxizing or some other thing).
+        { nw = glfwnw; nh = glfwnh; }
+
+        if(nw != w || nh != h)
         {
-            w = new_w;
-            h = new_h;
+            context.notify_new_resolution();
+            glfwSetWindowSize(context.window, nw, nh);
+
+            w = nw;
+            h = nh;
             swapchain.drop();
             swapchain = device.createSwapChain(surface, {{
                 .nextInChain = nullptr,
@@ -171,6 +195,24 @@ int main()
                 .presentMode = wgpu::PresentMode::Fifo,
             }});
         }
+        context.imgui_new_frame();
+
+        ImGui::BeginMainMenuBar();
+        {
+            auto frame_str = fmt::format("Frame {}: {:.1f} FPS -> {:.3f} MS", context.frame, 1/dt, dt);
+            ImGui::SetCursorPosX(ImGui::GetWindowSize().x - ImGui::CalcTextSize(frame_str.c_str()).x -  ImGui::GetStyle().ItemSpacing.x);
+            ImGui::Text("%s", frame_str.c_str());
+            ImGui::SetCursorPosX(0);
+
+            ImGui::PushItemWidth(100);
+            ImGui::InputInt("Width", &nw, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::PushItemWidth(100);
+            ImGui::InputInt("Height", &nh, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
+        }
+        ImGui::EndMainMenuBar();
+
+        ImGui::Begin("Teste");
+        ImGui::End();
 
         auto next_texture = swapchain.getCurrentTextureView();
         if(!next_texture) return context::loop_message::do_break;
@@ -196,9 +238,8 @@ int main()
         }});
         render_pass.setPipeline(pipeline);
         render_pass.draw(3, 1, 0, 0);
+        context.imgui_render(render_pass);
         render_pass.end();
-
-        next_texture.drop();
 
         auto command = encoder.finish({{
             .nextInChain = nullptr,
@@ -207,6 +248,7 @@ int main()
 
         queue.submit(command);
 
+        next_texture.drop();
         swapchain.present();
 
         return context::loop_message::do_continue;

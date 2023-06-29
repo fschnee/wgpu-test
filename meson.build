@@ -1,17 +1,26 @@
 project(
     'wgpu-template',
     'cpp',
-    meson_version: '>= 0.59.0',
+    meson_version: '>= 0.60.0',
     default_options: [ 'warning_level=3', 'cpp_std=c++20' ]
 )
 
-sources = ['src/main.cpp', 'src/webgpu.cpp']
-dependencies = meson.is_cross_build() ? [dependency('wgpu-cpp')] : [
+sources = [
+    'src/main.cpp',
+    'src/webgpu.cpp',
+    'src/context.cpp',
+]
+
+dependencies = [
     dependency('wgpu-cpp'),
-    dependency('wgpu-native'),
-    dependency('glfw3'),
-    dependency('glfw3webgpu'), # From https://eliemichel.github.io/LearnWebGPU/getting-started/the-adapter.html.
-                                # Just changed the included headers.
+    dependency('imgui', version: '>= 1.89.6', fallback: ['imgui', 'imgui_dep']).as_system('system'),
+    dependency('fmt',   version: '>= 7.0.0',  fallback: ['fmt', 'fmt_dep']).as_system('system'),
+    meson.is_cross_build() ? [] : [
+        dependency('wgpu-native'),
+        dependency('glfw3'),
+        dependency('glfw3webgpu'), # From https://eliemichel.github.io/LearnWebGPU/getting-started/the-adapter.html.
+                                   # Just changed the included headers.
+    ],
 ]
 incdirs = include_directories('src')
 
