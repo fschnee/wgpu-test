@@ -9,6 +9,7 @@ sources = [
     'src/main.cpp',
     'src/webgpu.cpp',
     'src/context.cpp',
+    'src/imgui_widgets/group_panel.cpp',
 ]
 
 dependencies = [

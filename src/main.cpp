@@ -1,14 +1,14 @@
 #include <cstdio>
 #include <glfw3webgpu.h>
-#include <imgui.h>
 #include <fmt/core.h>
+
+#include <imgui.h>
+#include "imgui_widgets/group_panel.hpp"
 
 #include "webgpu.hpp"
 #include "context.hpp"
 
-#include "standalone/dont_forget.hpp"
-#include "standalone/aliases.hpp"
-#include "standalone/chrono.hpp"
+#include "standalone/all.hpp"
 
 #ifdef __EMSCRIPTEN__
     #define IS_NATIVE false
@@ -24,6 +24,9 @@
 
 int main()
 {
+    using namespace standalone::integer_aliases;
+    namespace cvt = standalone::cvt;
+
     auto context = ::context{};
     context.init_glfw();
     PANIC_ON(!context.init_successful, "Could not initialize GLFW!\n");
@@ -45,6 +48,9 @@ int main()
     PANIC_ON(!adapter, "Failed creating adapter\n");
     DONT_FORGET(adapter.drop());
 
+    auto adapter_supported_limits = wgpu::SupportedLimits{};
+    adapter.getLimits(&adapter_supported_limits);
+
     auto device = adapter.requestDevice({{
         .nextInChain = nullptr,
         .label = "wgpui32{-t}est-device",
@@ -55,13 +61,15 @@ int main()
     }});
     DONT_FORGET(device.drop());
 
+    auto device_supported_limits = wgpu::SupportedLimits{};
+    device.getLimits(&device_supported_limits);
+
     auto queue = device.getQueue();
 
-    using namespace standalone::integer_aliases;
     auto w = 640_u32;
     auto h = 480_u32;
-    auto nw = i32{w}; // Update these to change resolution, used later.
-    auto nh = i32{h};
+    auto nw = 1280_u32; // Update these to change resolution, used later.
+    auto nh = 640_u32;
     auto swapchainformat = surface.getPreferredFormat(adapter);
     auto swapchain = device.createSwapChain(surface, {{
         .nextInChain = nullptr,
@@ -168,14 +176,7 @@ int main()
     auto stopwatch = standalone::chrono::stopwatch{};
     context.loop([&]()
     {
-        auto dt = stopwatch.since_click();
-        stopwatch.click();
-
-        auto glfwnw = 0;
-        auto glfwnh = 0;
-        glfwGetFramebufferSize(context.window, &glfwnw, &glfwnh);
-        if(glfwnw != w || glfwnh != h) // If glfw want us to change resolution (maxizing or some other thing).
-        { nw = glfwnw; nh = glfwnh; }
+        auto dt = stopwatch.click().last_segment();
 
         if(nw != w || nh != h)
         {
@@ -199,19 +200,76 @@ int main()
 
         ImGui::BeginMainMenuBar();
         {
-            auto frame_str = fmt::format("Frame {}: {:.1f} FPS -> {:.3f} MS", context.frame, 1/dt, dt);
+            auto frame_str = fmt::format("Frame {}: {:.1f} FPS -> {:.4f} MS", context.frame, 1/dt, dt);
             ImGui::SetCursorPosX(ImGui::GetWindowSize().x - ImGui::CalcTextSize(frame_str.c_str()).x -  ImGui::GetStyle().ItemSpacing.x);
             ImGui::Text("%s", frame_str.c_str());
             ImGui::SetCursorPosX(0);
 
             ImGui::PushItemWidth(100);
-            ImGui::InputInt("Width", &nw, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::InputInt("Width",  &nw * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
             ImGui::PushItemWidth(100);
-            ImGui::InputInt("Height", &nh, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::InputInt("Height", &nh * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
         }
         ImGui::EndMainMenuBar();
 
-        ImGui::Begin("Teste");
+        if(ImGui::Begin("Adapter Limits"))
+        {
+            #define STRINGIFY(a) STRINGIFY_IMPL(a)
+            #define STRINGIFY_IMPL(a) #a
+            #define IMGUI_LIMIT_DISPLAY(name)                                    \
+                ImGui::Text(fmt::format(                                         \
+                    "{:<41}: {} = {:^20} {:^20}",                                \
+                    STRINGIFY(name),                                             \
+                    standalone::clean_type_name(decltype(wgpu::Limits::name){}), \
+                    adapter_supported_limits.limits.name,                        \
+                    device_supported_limits.limits.name                          \
+                ).c_str());
+
+            auto const begin = ImGui::GetCursorPos();
+            IMGUI_LIMIT_DISPLAY(maxTextureDimension2D);
+            IMGUI_LIMIT_DISPLAY(maxTextureDimension3D);
+            IMGUI_LIMIT_DISPLAY(maxTextureArrayLayers);
+            IMGUI_LIMIT_DISPLAY(maxBindGroups);
+            IMGUI_LIMIT_DISPLAY(maxBindingsPerBindGroup);
+            IMGUI_LIMIT_DISPLAY(maxDynamicUniformBuffersPerPipelineLayout);
+            IMGUI_LIMIT_DISPLAY(maxDynamicStorageBuffersPerPipelineLayout);
+            IMGUI_LIMIT_DISPLAY(maxSampledTexturesPerShaderStage);
+            IMGUI_LIMIT_DISPLAY(maxSamplersPerShaderStage);
+            IMGUI_LIMIT_DISPLAY(maxStorageBuffersPerShaderStage);
+            IMGUI_LIMIT_DISPLAY(maxStorageTexturesPerShaderStage);
+            IMGUI_LIMIT_DISPLAY(maxUniformBuffersPerShaderStage);
+            IMGUI_LIMIT_DISPLAY(maxUniformBufferBindingSize);
+            IMGUI_LIMIT_DISPLAY(maxStorageBufferBindingSize);
+            IMGUI_LIMIT_DISPLAY(minUniformBufferOffsetAlignment);
+            IMGUI_LIMIT_DISPLAY(minStorageBufferOffsetAlignment);
+            IMGUI_LIMIT_DISPLAY(maxVertexBuffers);
+            IMGUI_LIMIT_DISPLAY(maxBufferSize);
+            IMGUI_LIMIT_DISPLAY(maxVertexAttributes);
+            IMGUI_LIMIT_DISPLAY(maxVertexBufferArrayStride);
+            IMGUI_LIMIT_DISPLAY(maxInterStageShaderComponents);
+            IMGUI_LIMIT_DISPLAY(maxInterStageShaderVariables);
+            IMGUI_LIMIT_DISPLAY(maxColorAttachments);
+            IMGUI_LIMIT_DISPLAY(maxColorAttachmentBytesPerSample);
+            IMGUI_LIMIT_DISPLAY(maxComputeWorkgroupStorageSize);
+            IMGUI_LIMIT_DISPLAY(maxComputeInvocationsPerWorkgroup);
+            IMGUI_LIMIT_DISPLAY(maxComputeWorkgroupSizeX);
+            IMGUI_LIMIT_DISPLAY(maxComputeWorkgroupSizeY);
+            IMGUI_LIMIT_DISPLAY(maxComputeWorkgroupSizeZ);
+            IMGUI_LIMIT_DISPLAY(maxComputeWorkgroupsPerDimension);
+
+            auto const end = ImGui::GetCursorPos();
+            ImGui::SetCursorPos({begin.x + 341, begin.y - 10});
+            ImGui::BeginGroupPanel("adapter");
+            ImGui::InvisibleButton("adapterbtn", {128, 500});
+            ImGui::EndGroupPanel();
+
+            ImGui::SetCursorPos({begin.x + 487, begin.y - 10});
+            ImGui::BeginGroupPanel("device");
+            ImGui::InvisibleButton("devicebtn", {128, 500});
+            ImGui::EndGroupPanel();
+
+            ImGui::SetCursorPos(end);
+        }
         ImGui::End();
 
         auto next_texture = swapchain.getCurrentTextureView();
