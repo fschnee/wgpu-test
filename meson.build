@@ -10,12 +10,14 @@ sources = [
     'src/webgpu.cpp',
     'src/context.cpp',
     'src/imgui_widgets/group_panel.cpp',
+    'src/zep.cpp'
 ]
 
 dependencies = [
     dependency('wgpu-cpp'),
     dependency('imgui', version: '>= 1.89.6', fallback: ['imgui', 'imgui_dep']).as_system('system'),
     dependency('fmt',   version: '>= 7.0.0',  fallback: ['fmt', 'fmt_dep']).as_system('system'),
+    dependency('zep',                         fallback: ['zep', 'zep_dep']).as_system('system'),
     meson.is_cross_build() ? [] : [
         dependency('wgpu-native'),
         dependency('glfw3'),

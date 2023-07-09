@@ -1,12 +1,16 @@
-#include <cstdio>
-#include <glfw3webgpu.h>
 #include <fmt/core.h>
+
+#include <filesystem>
+#include <chrono>
 
 #include <imgui.h>
 #include "imgui_widgets/group_panel.hpp"
 
+#include "zep.hpp"
+
 #include "webgpu.hpp"
 #include "context.hpp"
+#include <glfw3webgpu.h>
 
 #include "standalone/all.hpp"
 
@@ -16,7 +20,7 @@
     #define ON_NATIVE(code)
 #else
     #define IS_NATIVE true
-    #define PANIC_ON(cond, msg) if(cond) { std::printf(msg); return 1; }
+    #define PANIC_ON(cond, msg) if(cond) { fmt::print("{}", msg); return 1; }
     #define ON_NATIVE(code) code
 #endif
 
@@ -53,13 +57,16 @@ int main()
 
     auto device = adapter.requestDevice({{
         .nextInChain = nullptr,
-        .label = "wgpui32{-t}est-device",
+        .label = "wgpu-test-device",
         .requiredFeaturesCount = 0,
         .requiredFeatures = nullptr,
         .requiredLimits = nullptr,
         .defaultQueue = { .nextInChain = nullptr, .label = "wgpu-test-default-queue" }
     }});
     DONT_FORGET(device.drop());
+    [[maybe_unused]] auto device_error_callback_keepalive = device.setUncapturedErrorCallback([](WGPUErrorType type, char const* message) {
+        fmt::print("Uncaptured device error: type {}: {}\n", type, message);
+    });
 
     auto device_supported_limits = wgpu::SupportedLimits{};
     device.getLimits(&device_supported_limits);
@@ -85,23 +92,14 @@ int main()
     context.init_imgui(device, swapchainformat);
     PANIC_ON(!context.imgui_init_successful, "Could not init ImGui!\n");
 
+    auto const default_shader_code =
+        #include "default_shader.hpp.inc"
+    ;
+    auto shader_code = default_shader_code;
+
     auto shader_wgsl_desc = WGPUShaderModuleWGSLDescriptor{
         .chain = {.next = nullptr, .sType = wgpu::SType::ShaderModuleWGSLDescriptor},
-        .code = R"(
-            @vertex
-            fn vert(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4<f32> {
-                var p = vec2f(0.0, 0.0);
-                if      (in_vertex_index == 0u) { p = vec2f(-0.5, -0.5); }
-                else if (in_vertex_index == 1u) { p = vec2f(0.5, -0.5); }
-                else                            { p = vec2f(0.0, 0.5); }
-                return vec4f(p, 0.0, 1.0);
-            }
-
-            @fragment
-            fn frag() -> @location(0) vec4f {
-                return vec4f(0.0, 0.4, 1.0, 1.0);
-            }
-        )",
+        .code = shader_code
     };
 
     auto shader_desc = WGPUShaderModuleDescriptor{
@@ -173,6 +171,9 @@ int main()
         .fragment = &fragment_state
     }});
 
+    auto zep_has_init = false;
+    DONT_FORGET(if(zep_has_init) zep_destroy());
+
     auto stopwatch = standalone::chrono::stopwatch{};
     context.loop([&]()
     {
@@ -196,7 +197,15 @@ int main()
                 .presentMode = wgpu::PresentMode::Fifo,
             }});
         }
+
         context.imgui_new_frame();
+        if(!zep_has_init) {
+            zep_init({1.0f, 1.0f});
+            zep_load(std::filesystem::current_path() / "src" / "default_shader.hpp.inc");
+            zep_has_init = true;
+        }
+        zep_update();
+        zep_show({640, 480});
 
         ImGui::BeginMainMenuBar();
         {
