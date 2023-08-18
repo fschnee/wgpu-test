@@ -15,9 +15,10 @@ sources = [
 
 dependencies = [
     dependency('wgpu-cpp'),
-    dependency('imgui', version: '>= 1.89.6', fallback: ['imgui', 'imgui_dep']).as_system('system'),
-    dependency('fmt',   version: '>= 7.0.0',  fallback: ['fmt', 'fmt_dep']).as_system('system'),
-    dependency('zep',                         fallback: ['zep', 'zep_dep']).as_system('system'),
+    dependency('imgui',    version: '>= 1.89.6', fallback: ['imgui', 'imgui_dep']).as_system('system'),
+    dependency('rapidobj', version: '= 1.0.1',   fallback: ['rapidobj', 'rapidobj_dep']).as_system('system'),
+    dependency('fmt',      version: '>= 7.0.0',  fallback: ['fmt', 'fmt_dep']).as_system('system'),
+    dependency('zep',                            fallback: ['zep', 'zep_dep']).as_system('system'),
     meson.is_cross_build() ? [] : [
         dependency('wgpu-native'),
         dependency('glfw3'),

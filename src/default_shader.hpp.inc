@@ -1,22 +1,29 @@
 R"(
-struct VertexOut {
-    @builtin(position) position : vec4<f32>,
-    @location(0) color : vec4<f32>,
+@group(0) @binding(0) var<uniform> transform: mat4x4<f32>;
+
+struct VertIn
+{
+    @location(0) position: vec3f,
+    @location(1) color: vec3f,
+};
+
+struct FragIn
+{
+    @builtin(position) position: vec4f,
+
+    @location(0) color: vec3f,
 };
 
 @vertex
-fn vert(@builtin(vertex_index) in_vertex_index: u32) -> VertexOut
+fn vert(in: VertIn) -> FragIn
 {
-    var p : VertexOut;
-    if      (in_vertex_index == 0u) { p.position = vec4f(-0.5, -0.5, 0.0, 1.0); p.color = vec4f(1.0, 0.0, 0.0, 1.0); }
-    else if (in_vertex_index == 1u) { p.position = vec4f(0.5, -0.5, 0.0, 1.0);  p.color = vec4f(0.0, 1.0, 0.0, 1.0); }
-    else                            { p.position = vec4f(0.0, 0.5, 0.0, 1.0);   p.color = vec4f(0.0, 0.0, 1.0, 1.0); }
-    return p;
+    var o: FragIn;
+    o.position = vec4f(in.position, 1.0);
+    o.color    = in.color;
+    return o;
+
 }
 
 @fragment
-fn frag(fragData: VertexOut) -> @location(0) vec4<f32>
-{
-    return fragData.color;
-}
+fn frag(in: FragIn) -> @location(0) vec4f { return vec4f(in.color, 1.0); }
 )"

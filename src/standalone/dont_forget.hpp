@@ -7,19 +7,32 @@ namespace standalone
     template <typename Func>
     struct dont_forget
     {
-        constexpr dont_forget(Func&& oe) : on_exit{ standalone::forward<Func>(oe) } {}
+        constexpr dont_forget() = default;
+        constexpr dont_forget(Func&& oe) : on_exit{ forward<Func>(oe) } {}
 
-        // No copying or moving (>:O)
-        dont_forget() = delete;
-        dont_forget(dont_forget&&) = delete;
+        // No copying, just moving (>:O)
         dont_forget(const dont_forget&) = delete;
-        auto operator=(dont_forget&&) -> dont_forget& = delete;
         auto operator=(const dont_forget&) -> dont_forget& = delete;
 
-        ~dont_forget() { on_exit(); }
+        constexpr dont_forget(dont_forget&& other) { *this = move(other); }
+        constexpr auto operator=(dont_forget&& other) -> dont_forget&
+        {
+            this->on_exit = move(other.on_exit);
+            this->engaged = other.engaged;
+            other.clear();
+        }
+
+        constexpr auto is_engaged() -> bool { return this->engaged; }
+        constexpr auto clear() -> dont_forget&
+        {
+            this->engaged = false;
+        }
+
+        ~dont_forget() { if(engaged) on_exit(); }
 
     private:
-        Func on_exit;
+        bool engaged = false;
+        Func on_exit = []{};
     };
 }
 

@@ -1,0 +1,4 @@
+[wrap-git]
+url = https://github.com/guybrush77/rapidobj
+revision = v1.0.1
+patch_directory = rapidobj

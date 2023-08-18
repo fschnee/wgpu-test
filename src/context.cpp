@@ -1,7 +1,30 @@
 #include "context.hpp"
 
+#include "standalone/chrono.hpp"
+#include "standalone/cvt.hpp"
+
+#include <glfw3webgpu.h>
+
 #include <backends/imgui_impl_wgpu.h>
 #include <backends/imgui_impl_glfw.h>
+
+#include "m.hpp"
+
+#include <stdio.h>
+
+#ifdef __EMSCRIPTEN__
+    #define IS_NATIVE 0
+#else
+    #define IS_NATIVE 1
+#endif
+
+#include <fmt/core.h>
+
+auto context::get() -> context&
+{
+    static auto ctx = context{};
+    return ctx;
+}
 
 context::~context()
 {
@@ -12,6 +35,322 @@ context::~context()
         ImGui_ImplWGPU_Shutdown();
         ImGui_ImplGlfw_Shutdown();
     }
+}
+
+auto context::init_all() -> context&
+{
+    namespace cvt = standalone::cvt;
+    using namespace standalone::integer_aliases;
+
+    std::cout << "[glfw] Initializing glfw... " << std::flush;
+    this->init_glfw();
+    if     (!this->init_successful) throw context_error::failed_to_init_glfw;
+    else if(!this->window)          throw context_error::failed_to_open_window;
+    std::cout << "OK" << std::endl;
+
+    std::cout << "[wgpu] Requesting instance..." << std::endl;
+    if constexpr(IS_NATIVE) { this->init_instance({{.nextInChain = nullptr}}); }
+    else                    { this->init_instance(std::nullopt); }
+    std::cout << "\t" << this->instance << std::endl;
+    //DONT_FORGET(this->instance.drop());
+
+    std::cout << "[wgpu][glfw] Creating surface..." << std::endl;
+    if constexpr(IS_NATIVE) { this->init_surface(glfwGetWGPUSurface(this->instance, this->window)); }
+    else                    { this->init_surface(); }
+    std::cout << "\t" << this->surface << std::endl;
+
+    this->desc.adapter = {
+        .nextInChain = nullptr,
+        .compatibleSurface = this->surface,
+        .powerPreference = wgpu::PowerPreference::HighPerformance,
+        .forceFallbackAdapter = false
+    };
+    std::cout << "[wgpu] Requesting adapter." << std::endl;
+    this->adapter = this->instance.requestAdapter(this->desc.adapter);
+    std::cout << "\t" << adapter << std::endl;
+    if(!this->adapter) throw context_error::failed_to_create_adapter;
+    //DONT_FORGET(this->adapter.drop());
+
+    std::cout << "[wgpu] Fetching adapter limits... " << std::flush;
+    this->adapter.getLimits(&this->limits.adapter);
+    std::cout << "OK" << std::endl;
+
+    this->desc.device_limits = {
+        .nextInChain = nullptr,
+        .limits = {
+            // Max of laptop used for testing.
+            .maxTextureDimension1D = 8192,
+            .maxTextureDimension2D = 8192,
+            .maxTextureDimension3D = 2048,
+            .maxTextureArrayLayers = 256,
+	        .maxBindGroups = 4,
+            .maxDynamicUniformBuffersPerPipelineLayout = 8,
+            .maxDynamicStorageBuffersPerPipelineLayout = 4,
+            .maxSampledTexturesPerShaderStage = 16,
+            .maxSamplersPerShaderStage = 16,
+            .maxStorageBuffersPerShaderStage = 8,
+            .maxStorageTexturesPerShaderStage = 4,
+	        .maxUniformBuffersPerShaderStage = 12,
+	        .maxUniformBufferBindingSize = 65536,
+	        .maxStorageBufferBindingSize = 134217728,
+            .minUniformBufferOffsetAlignment = 256,
+	        .minStorageBufferOffsetAlignment = 256,
+	        .maxVertexBuffers = 8,
+	        .maxBufferSize = 1024*1024*256, // 256Mib.
+            .maxVertexAttributes = 16,
+	        .maxVertexBufferArrayStride = 2048,
+	        .maxInterStageShaderComponents = 116
+        }
+    };
+
+    WGPURequiredLimits* device_limits = desc.device_limits ? &desc.device_limits.value() : nullptr;
+    this->desc.device = {
+        .nextInChain = nullptr,
+        .label = "wgpu-test-device",
+        .requiredFeaturesCount = 0,
+        .requiredFeatures = nullptr,
+        .requiredLimits = device_limits,
+        .defaultQueue = { .nextInChain = nullptr, .label = "wgpu-test-default-queue" }
+    };
+    std::cout << "[wgpu] Requesting device..." << std::endl;
+    this->device = this->adapter.requestDevice(this->desc.device);
+    std::cout << "\t" << this->device << std::endl;
+
+    wgpuDeviceSetUncapturedErrorCallback(device, [](WGPUErrorType type, char const * message, void * userdata) {
+        auto& ctx = *(cvt::rc<context*> + userdata);
+        std::cout <<  "Uncaptured device error: type " << (type * cvt::to<u64>) << ": " << message << std::endl;
+    }, this);
+
+    // DONT_FORGET(this->device.drop());
+    std::cout << "[wgpu] Fetching device limits... " << std::flush;
+    this->device.getLimits(&this->limits.device);
+    std::cout << "OK" << std::endl;
+
+    auto swapchainformat = this->surface.getPreferredFormat(this->adapter);
+    this->desc.swapchain = {
+        .nextInChain = nullptr,
+        .label = "wgpu-test-swapchain",
+        .usage = wgpu::TextureUsage::RenderAttachment,
+        .format = swapchainformat,
+        .width = this->w,
+        .height = this->h,
+        .presentMode = wgpu::PresentMode::Fifo,
+    };
+    std::cout << "[wgpu] Creating swapchain..." << std::endl;
+    this->swapchain = this->device.createSwapChain(this->surface, this->desc.swapchain);
+    std::cout << "\t" << this->swapchain << std::endl;
+    //DONT_FORGET(this->swapchain.drop());
+
+    std::cout << "[imgui] Initializing imgui... " << std::flush;
+    this->init_imgui(this->device, swapchainformat);
+    std::cout << (this->imgui_init_successful ? "OK" : "ERROR") << std::endl;
+    if(!this->imgui_init_successful) throw context_error::failed_to_init_imgui;
+
+    this->desc.shader_wgsl = {
+        .chain = {.next = nullptr, .sType = wgpu::SType::ShaderModuleWGSLDescriptor},
+        .code = this->desc.shader_code.c_str()
+    };
+
+    this->desc.shader = WGPUShaderModuleDescriptor{
+        .nextInChain = &this->desc.shader_wgsl.chain, // Need to fallback to wgpu-native since wgpu-cpp sets nextInChain to nullptr.
+        .label = "wgpu-test-shader",
+        .hintCount = 0,
+        .hints = nullptr
+    };
+
+    std::cout << "[wgpu] Creating shader module..." << std::endl;
+    this->shader = wgpu::ShaderModule{ wgpuDeviceCreateShaderModule(this->device, &this->desc.shader) };
+    std::cout << "\t" << this->shader << std::endl;
+
+    this->desc.blend_state = {
+        .color = {
+            .operation = wgpu::BlendOperation::Add,
+            .srcFactor = wgpu::BlendFactor::SrcAlpha,
+            .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha
+        },
+        .alpha = {
+            .operation = wgpu::BlendOperation::Add,
+            .srcFactor = wgpu::BlendFactor::Zero,
+            .dstFactor = wgpu::BlendFactor::One
+        }
+    };
+
+    this->desc.color_target = {
+        .nextInChain = nullptr,
+        .format = swapchainformat,
+        .blend = &this->desc.blend_state,
+        .writeMask = wgpu::ColorWriteMask::All
+    };
+
+    this->desc.fragment_state = {
+        .nextInChain = nullptr,
+        .module = shader,
+        .entryPoint = "frag",
+        .constantCount = 0,
+        .constants = nullptr,
+        .targetCount = 1,
+        .targets = &this->desc.color_target
+    };
+
+    // The binding index as used in the @binding attribute in the shader
+    this->desc.binding_layouts[0] = {
+        .binding = 0,
+        // The stage that needs to access this resource
+        .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
+        .buffer = {
+            .type = wgpu::BufferBindingType::Uniform,
+            .minBindingSize = sizeof(float) * 4 * 4
+        }
+    };
+
+    // The new binding layout, for the sampler
+    //this->desc.binding_layouts[1] = {
+    //    .binding = 1,
+    //    .visibility = wgpu::ShaderStage::Fragment,
+    //    .sampler = { .type = wgpu::SamplerBindingType::Filtering }
+    //};
+
+    // Create a bind group layout
+    this->desc.binding_descriptor = {
+        .entryCount = 1,
+        .entries = this->desc.binding_layouts
+    };
+    std::cout << "[wgpu] Creating uniform bind group " << this->desc.binding_layouts[0].binding << " layout ..." << std::endl;
+    this->bind_group_layout = device.createBindGroupLayout(this->desc.binding_descriptor);
+    std::cout << "\t" << this->bind_group_layout << std::endl;
+    this->desc.pipeline_layout = {
+        .bindGroupLayoutCount = 1,
+        .bindGroupLayouts = (WGPUBindGroupLayout*)&this->bind_group_layout
+    };
+    std::cout << "[wgpu] Creating pipeline layout..." << std::endl;
+    this->pipeline_layout = device.createPipelineLayout(this->desc.pipeline_layout);
+    std::cout << "\t" << this->pipeline_layout << std::endl;
+
+    this->desc.vertex_buffer_attributes.push_back({
+        .format = wgpu::VertexFormat::Float32x3, // xyz.
+        .offset = 0,
+        .shaderLocation = 0, // @location(0).
+    });
+    this->desc.vertex_buffer_attributes.push_back({
+        .format = wgpu::VertexFormat::Float32x3, // rgb.
+        .offset = 0,
+        .shaderLocation = 1, // @location(1).
+    });
+    this->desc.vertex_buffer_layouts.push_back({
+        .arrayStride = 3 * sizeof(float), // xyz
+        .stepMode = wgpu::VertexStepMode::Vertex,
+        .attributeCount = 1,
+        .attributes = &this->desc.vertex_buffer_attributes[0],
+    });
+    this->desc.vertex_buffer_layouts.push_back({
+        .arrayStride = 3 * sizeof(float), // rgb
+        .stepMode = wgpu::VertexStepMode::Vertex,
+        .attributeCount = 1,
+        .attributes = &this->desc.vertex_buffer_attributes[1],
+    });
+
+    this->desc.pipeline = {
+        .nextInChain = nullptr,
+        .label = "wgpu-test-pipeline",
+        .layout = this->pipeline_layout,
+        .vertex = {
+            .nextInChain = nullptr,
+            .module = this->shader,
+            .entryPoint = "vert",
+            .constantCount = 0,
+            .constants = nullptr,
+            .bufferCount = cvt::toe * this->desc.vertex_buffer_layouts.size(),
+            .buffers = this->desc.vertex_buffer_layouts.data()
+        },
+        .primitive = {
+            .nextInChain = nullptr,
+            .topology = wgpu::PrimitiveTopology::TriangleList,
+            .stripIndexFormat = wgpu::IndexFormat::Undefined,
+            .frontFace = wgpu::FrontFace::CCW,
+            .cullMode = wgpu::CullMode::None
+        },
+        .depthStencil = nullptr,
+        .multisample = {
+            .nextInChain = nullptr,
+            .count = 1,
+            .mask = ~0u,
+            .alphaToCoverageEnabled = false
+        },
+        .fragment = &this->desc.fragment_state
+    };
+    std::cout << "[wgpu] Creating render pipeline..." << std::endl;
+    this->pipeline = this->device.createRenderPipeline(this->desc.pipeline);
+    std::cout << "\t" << this->pipeline << std::endl;
+
+    std::cout << "[wgpu] Creating vertex buffer..." << std::endl;
+    this->desc.vertex_buffer = {
+        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Vertex,
+        .size  = 10000 * sizeof(float),
+        .mappedAtCreation = false,
+    };
+    this->vertex_buffer = device.createBuffer(this->desc.vertex_buffer);
+    std::cout << "\t" << this->vertex_buffer << std::endl;
+
+    std::cout << "[wgpu] Creating color buffer..." << std::endl;
+    this->desc.color_buffer = {
+        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Vertex,
+        .size  = this->desc.vertex_buffer.size,
+        .mappedAtCreation = false,
+    };
+    this->color_buffer = device.createBuffer(this->desc.color_buffer);
+    std::cout << "\t" << this->color_buffer << std::endl;
+
+    std::cout << "[wgpu] Creating uniform buffer..." << std::endl;
+	this->desc.uniform_buffer = {
+        .nextInChain = nullptr,
+        .label = "uniform buffer",
+        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform,
+        .size = this->desc.device_limits->limits.maxUniformBufferBindingSize,
+        .mappedAtCreation = false
+    };
+    this->uniform_buffer = device.createBuffer(this->desc.uniform_buffer);
+    std::cout << "\t" << this->uniform_buffer << std::endl;
+    auto pos = m4f::translation(0, 0, 0);
+    std::cout << "[wgpu][uniform_buffer] Writing m4f::translation(0, 0, 0)... " << std::flush;
+    device.getQueue().writeBuffer(this->uniform_buffer, 0, &pos.raw, sizeof(float) * 4 * 4);
+    std::cout << "OK" << std::endl;
+
+    // Uniform.
+	this->desc.bindings[0] = {
+	    .binding = 0,
+	    .buffer = this->uniform_buffer,
+    	.offset = 0,
+    	.size = this->desc.device_limits->limits.maxUniformBufferBindingSize
+    };
+
+    //this->desc.sampler = {
+	//    .addressModeU = wgpu::AddressMode::Repeat,
+	//    .addressModeV = wgpu::AddressMode::Repeat,
+	//    .addressModeW = wgpu::AddressMode::Repeat,
+	//    .magFilter = wgpu::FilterMode::Linear,
+	//    .minFilter = wgpu::FilterMode::Linear,
+	//    .mipmapFilter = wgpu::MipmapFilterMode::Linear,
+	//    .lodMinClamp = 0.0f,
+	//    .lodMaxClamp = 32.0f,
+	//    .compare = wgpu::CompareFunction::Undefined,
+	//    .maxAnisotropy = 1
+    //};
+	//this->sampler = this->device.createSampler(this->desc.sampler);
+    //this->desc.bindings[1] = {
+    //    .binding = 1,
+    //    .sampler = this->sampler
+    //};
+
+    this->desc.bind_group_descriptor = {
+        .layout = this->bind_group_layout,
+        .entryCount = this->desc.binding_descriptor.entryCount,
+        .entries = this->desc.bindings
+    };
+    std::cout << "[wgpu] Creating Bind Group..." << std::endl;
+    this->bind_group = device.createBindGroup(this->desc.bind_group_descriptor);
+    std::cout << "\t" << this->bind_group << std::endl;
+
+    return *this;
 }
 
 auto context::imgui_new_frame() -> void
@@ -26,7 +365,7 @@ auto context::imgui_new_frame() -> void
 
     ImGui_ImplWGPU_NewFrame();
     ImGui_ImplGlfw_NewFrame();
-    if(imgui_init_successful) ImGui::NewFrame();
+    ImGui::NewFrame();
 }
 
 auto context::imgui_render(WGPURenderPassEncoder pass) -> void
@@ -42,7 +381,7 @@ auto context::init_glfw() -> context&
 
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // We'll use webgpu and not whatever it wants to try to set default.
-    auto window = glfwCreateWindow(640, 480, "wgpu-test", nullptr, nullptr);
+    auto window = glfwCreateWindow(this->w, this->h, "wgpu-test", nullptr, nullptr);
     this->window = window;
     return *this;
 }
@@ -63,13 +402,46 @@ auto context::init_imgui(WGPUDevice device, WGPUTextureFormat swapchainformat, W
     return *this;
 }
 
-auto context::notify_new_resolution() -> context&
+auto context::set_resolution(standalone::u32 nw, standalone::u32 nh) -> context&
 {
     this->new_resolution = true;
     ImGui_ImplWGPU_InvalidateDeviceObjects();
+
+    glfwSetWindowSize(this->window, nw, nh);
+
+    this->w = nw;
+    this->h = nh;
+    this->swapchain.drop();
+    this->swapchain = this->device.createSwapChain(this->surface, {{
+        .nextInChain = nullptr,
+        .label = "wgpu-test-swapchain",
+        .usage = wgpu::TextureUsage::RenderAttachment,
+        .format = this->surface.getPreferredFormat(this->adapter),
+        .width = w,
+        .height = h,
+        .presentMode = wgpu::PresentMode::Fifo,
+    }});
+
     return *this;
 }
 
+auto context::loop(void* userdata, loop_callback fn) -> void
+{
+    auto stopwatch = standalone::chrono::stopwatch{};
+
+    #ifndef __EMSCRIPTEN__
+        while (!glfwWindowShouldClose(window))
+        {
+            auto dt = stopwatch.click().last_segment();
+            glfwPollEvents();
+            if(fn(dt, *this, userdata) == loop_message::do_break) break;
+        }
+    #else
+        while(true) fn(); // TODO: implement loop.
+    #endif
+}
+
+// ImGui Backend stuff below.
 
 #include <backends/imgui_impl_glfw.cpp>
 // Code below adapted from imgui/backends/imgui_impl_wgpu.cpp
