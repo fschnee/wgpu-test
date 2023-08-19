@@ -6,6 +6,8 @@
 
 #include "standalone/aliases.hpp"
 
+#include "m.hpp"
+
 #include <optional>
 #include <array>
 
@@ -37,6 +39,8 @@ struct wgpudesc
     WGPUBufferDescriptor uniform_buffer = {};
     WGPUBindGroupEntry bindings[3];
     WGPUBindGroupDescriptor bind_group_descriptor = {};
+
+    WGPUBufferDescriptor index_buffer = {};
 
     WGPUBufferDescriptor vertex_buffer = {};
     WGPUBufferDescriptor color_buffer = {};
@@ -74,11 +78,20 @@ struct context
     wgpu::Buffer uniform_buffer = {nullptr};
     wgpu::Buffer vertex_buffer = {nullptr};
     wgpu::Buffer color_buffer = {nullptr};
+    wgpu::Buffer index_buffer = {nullptr};
     wgpu::SwapChain swapchain = {nullptr};
     wgpu::RenderPipeline pipeline = {nullptr};
     wgpu::ShaderModule shader = {nullptr};
 
     wgpulimits limits = {};
+
+    struct uniforms
+    {
+        m4f transform;
+        float time;
+
+        float _pad[15];
+    };
 
     auto init_instance()
     {

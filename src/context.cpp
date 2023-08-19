@@ -199,7 +199,7 @@ auto context::init_all() -> context&
         .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
         .buffer = {
             .type = wgpu::BufferBindingType::Uniform,
-            .minBindingSize = sizeof(float) * 4 * 4
+            .minBindingSize = sizeof(uniforms)
         }
     };
 
@@ -299,6 +299,16 @@ auto context::init_all() -> context&
     };
     this->color_buffer = device.createBuffer(this->desc.color_buffer);
     std::cout << "\t" << this->color_buffer << std::endl;
+
+    std::cout << "[wgpu] Creating index buffer..." << std::endl;
+    this->desc.index_buffer = {
+        .nextInChain = nullptr,
+        .label = "Index buffer",
+        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Index,
+        .size = this->limits.device.limits.maxBufferSize
+    };
+    this->index_buffer = device.createBuffer(this->desc.index_buffer);
+    std::cout << "\t" << this->index_buffer << std::endl;
 
     std::cout << "[wgpu] Creating uniform buffer..." << std::endl;
 	this->desc.uniform_buffer = {
