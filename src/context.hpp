@@ -102,10 +102,18 @@ struct context
     {
         m4f view;
         m4f projection;
+        std::array<float, 3> light_direction;
+
+        float _pad1;
+
+        std::array<float, 3> light_color;
+
+        float _pad2;
+
         float time;
         float gamma;
 
-        float _pad[2];
+        float _pad3[6];
     };
 
     // Changes per-object.

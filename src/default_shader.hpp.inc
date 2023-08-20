@@ -1,15 +1,17 @@
 R"(
 struct scene_uniforms
 {
-    view: mat4x4<f32>,
-    projection: mat4x4<f32>,
+    view: mat4x4f,
+    projection: mat4x4f,
+    light_direction: vec3f,
+    light_color: vec3f,
     time: f32,
     gamma: f32,
 };
 
 struct object_uniforms
 {
-    transform: mat4x4<f32>
+    transform: mat4x4f
 };
 
 @group(0) @binding(0) var<uniform> s: scene_uniforms;
@@ -37,15 +39,16 @@ fn vert(in: VertIn) -> FragIn
     var out: FragIn;
     out.position = s.projection * s.view * o.transform * vec4f(in.position, 1.0);
     out.color    = in.color;
-    out.normal   = in.normal;
+    out.normal   = normalize(o.transform * vec4f(in.normal, 0.0)).xyz; // Make lighting direction-dependent.
     return out;
 }
 
 @fragment
 fn frag(in: FragIn) -> @location(0) vec4f
 {
-    let color = in.normal * 0.5 + 0.5;
-    let linear_color = pow(color, vec3f(s.gamma));
-    return vec4f(linear_color, 1.0);
+    let shading      = dot(normalize(s.light_direction), in.normal) * s.light_color;
+    let color        = in.color * shading;
+    //let linear_color = pow(color, vec3f(s.gamma));
+    return vec4f(color, 1.0);
 }
 )"

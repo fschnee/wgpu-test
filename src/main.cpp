@@ -162,9 +162,13 @@ int main()
             .xRotate(-3.0f * M_PI / 4.0f);
 
         const auto scene_uniforms = context::scene_uniforms{
-            .view = mview,
+            .view       = mview,
             .projection = mprojection,
-            .time = ud.total_seconds,
+
+            .light_direction = {0.2f, 0.4f, 0.3f},
+            .light_color     = {1.0f, 0.9f, 0.6f},
+
+            .time  = ud.total_seconds,
             .gamma = 2.2,
         };
 
