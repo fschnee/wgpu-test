@@ -142,7 +142,8 @@ auto context::init_all() -> context&
     //DONT_FORGET(this->swapchain.drop());
 
     std::cout << "[imgui] Initializing imgui... " << std::flush;
-    this->init_imgui(this->device, swapchainformat);
+    this->desc.depth_stencil_format = wgpu::TextureFormat::Depth24Plus;
+    this->init_imgui(this->device, swapchainformat, this->desc.depth_stencil_format);
     std::cout << (this->imgui_init_successful ? "OK" : "ERROR") << std::endl;
     if(!this->imgui_init_successful) throw context_error::failed_to_init_imgui;
 
@@ -249,6 +250,15 @@ auto context::init_all() -> context&
         .attributes = &this->desc.vertex_buffer_attributes[1],
     });
 
+    auto depth_stencil_state_helper = wgpu::DepthStencilState{};
+    depth_stencil_state_helper.setDefault();
+    depth_stencil_state_helper.format = this->desc.depth_stencil_format;
+    depth_stencil_state_helper.depthWriteEnabled = true;
+    depth_stencil_state_helper.depthCompare = wgpu::CompareFunction::Less;
+    depth_stencil_state_helper.stencilReadMask = 0;
+    depth_stencil_state_helper.stencilWriteMask = 0;
+    this->desc.depth_stencil_state = depth_stencil_state_helper;
+
     this->desc.pipeline = {
         .nextInChain = nullptr,
         .label = "wgpu-test-pipeline",
@@ -269,7 +279,7 @@ auto context::init_all() -> context&
             .frontFace = wgpu::FrontFace::CCW,
             .cullMode = wgpu::CullMode::None
         },
-        .depthStencil = nullptr,
+        .depthStencil = &this->desc.depth_stencil_state,
         .multisample = {
             .nextInChain = nullptr,
             .count = 1,
@@ -320,10 +330,6 @@ auto context::init_all() -> context&
     };
     this->uniform_buffer = device.createBuffer(this->desc.uniform_buffer);
     std::cout << "\t" << this->uniform_buffer << std::endl;
-    auto pos = m4f::translation(0, 0, 0);
-    std::cout << "[wgpu][uniform_buffer] Writing m4f::translation(0, 0, 0)... " << std::flush;
-    device.getQueue().writeBuffer(this->uniform_buffer, 0, &pos.raw, sizeof(float) * 4 * 4);
-    std::cout << "OK" << std::endl;
 
     // Uniform.
 	this->desc.bindings[0] = {
@@ -359,6 +365,31 @@ auto context::init_all() -> context&
     std::cout << "[wgpu] Creating Bind Group..." << std::endl;
     this->bind_group = device.createBindGroup(this->desc.bind_group_descriptor);
     std::cout << "\t" << this->bind_group << std::endl;
+
+    std::cout << "[wgpu] Creating Depth Texture..." << std::endl;
+    this->desc.depth_texture = {
+        .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
+        .dimension = wgpu::TextureDimension::_2D,
+        .size = {this->w, this->h, 1},
+        .format = this->desc.depth_stencil_format,
+        .mipLevelCount = 1,
+        .sampleCount = 1,
+        .viewFormatCount = 1,
+        .viewFormats = (WGPUTextureFormat*)&this->desc.depth_stencil_format,
+    };
+    this->depth_texture = device.createTexture(this->desc.depth_texture);
+    std::cout << "\t" << this->depth_texture << std::endl;
+    this->desc.depth_texture_view = {
+        .format = this->desc.depth_stencil_format,
+        .dimension = wgpu::TextureViewDimension::_2D,
+        .baseMipLevel = 0,
+        .mipLevelCount = 1,
+        .baseArrayLayer = 0,
+        .arrayLayerCount = 1,
+        .aspect = wgpu::TextureAspect::DepthOnly,
+    };
+    this->depth_texture_view = this->depth_texture.createView(this->desc.depth_texture_view);
+    std::cout << "\t" << this->depth_texture_view << std::endl;
 
     return *this;
 }
@@ -419,8 +450,20 @@ auto context::set_resolution(standalone::u32 nw, standalone::u32 nh) -> context&
 
     glfwSetWindowSize(this->window, nw, nh);
 
+    //this->depth_texture_view.release();
+    this->depth_texture.destroy();
+    //this->depth_texture.release();
+
     this->w = nw;
     this->h = nh;
+
+    std::cout << "[wgpu] RESOLUTION CHANGE => Recreating depth texture..." << std::endl;
+    this->desc.depth_texture.size = {this->w, this->h, 1};
+    this->depth_texture = device.createTexture(this->desc.depth_texture);
+    std::cout << "\t" << this->depth_texture << std::endl;
+    this->depth_texture_view = this->depth_texture.createView(this->desc.depth_texture_view);
+    std::cout << "\t" << this->depth_texture_view << std::endl;
+
     this->swapchain.drop();
     this->swapchain = this->device.createSwapChain(this->surface, {{
         .nextInChain = nullptr,

@@ -1,7 +1,7 @@
 R"(
 struct uniforms
 {
-    transform: mat4x4<f32>,
+    mvp: mat4x4<f32>,
     time: f32,
 };
 
@@ -24,10 +24,9 @@ struct FragIn
 fn vert(in: VertIn) -> FragIn
 {
     var o: FragIn;
-    o.position = vec4f(in.position, 1.0) * u.transform;
+    o.position = u.mvp * vec4f(in.position, 1.0);
     o.color    = in.color;
     return o;
-
 }
 
 @fragment

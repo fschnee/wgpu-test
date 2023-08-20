@@ -46,6 +46,11 @@ struct wgpudesc
     WGPUBufferDescriptor color_buffer = {};
     std::vector<WGPUVertexBufferLayout> vertex_buffer_layouts = {};
     std::vector<WGPUVertexAttribute> vertex_buffer_attributes = {};
+
+    WGPUTextureFormat depth_stencil_format;
+    WGPUDepthStencilState depth_stencil_state;
+    WGPUTextureDescriptor depth_texture;
+    WGPUTextureViewDescriptor depth_texture_view;
 };
 
 struct wgpulimits
@@ -83,14 +88,17 @@ struct context
     wgpu::RenderPipeline pipeline = {nullptr};
     wgpu::ShaderModule shader = {nullptr};
 
+    wgpu::Texture depth_texture = {nullptr};
+    wgpu::TextureView depth_texture_view = {nullptr};
+
     wgpulimits limits = {};
 
     struct uniforms
     {
-        m4f transform;
+        m4f mvp;
         float time;
 
-        float _pad[15];
+        float _pad[3];
     };
 
     auto init_instance()

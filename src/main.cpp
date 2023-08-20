@@ -46,7 +46,10 @@ int main()
         u32 nw = 1280;
         u32 nh = 640;
 
-        float depth = 200;
+        // Perspective stuff.
+        float focal_len = 2.0;
+        float near = 0.01;
+        float far  = 100;
         float translation[3] = {0, 0, 0};
         float rotation[3] = {0, 0, 0};
         float scale[3] = {1, 1, 1};
@@ -96,16 +99,34 @@ int main()
 
         if(ud.nw != ctx.w || ud.nh != ctx.h) { ctx.set_resolution(ud.nw, ud.nh); }
 
-        // Ignoring projection for now.
-        auto transform = m4f::translation(0, 0, 0) //m4f::projection(ud.nw, ud.nh, ud.depth)
+        auto mprojection = m4f::perspective({
+                .focal_len = ud.focal_len,
+                .aspect_ratio = (ud.nw * cvt::to<float>) / (ud.nh * cvt::to<float>),
+                .near = ud.near,
+                .far = ud.far
+            });
+
+	    auto mmodel = m4f::zRotation(ud.total_seconds)
+            .translate(0.5, 0.0, 0.0)
+            .scale(0.3, 0.3, 0.3)
             .translate(ud.translation[0], ud.translation[1], ud.translation[2])
             .xRotate(ud.rotation[0])
             .yRotate(ud.rotation[1])
             .zRotate(ud.rotation[2])
             .scale(ud.scale[0], ud.scale[1], ud.scale[2]);
 
+	    auto mview = m4f::translation(0, 0, 2)
+            .xRotate(-3.0f * M_PI / 4.0f);
+
+        static bool use_mmodel = true;
+        static bool use_mview = true;
+
+        auto mvp = ud.use_transform ? mprojection : m4f::scaling(1, 1, 1);
+        mvp = use_mview ? mvp.dot(mview) : mvp;
+        mvp = use_mmodel ? mvp.dot(mmodel) : mvp;
+
         const auto uniform = context::uniforms{
-            .transform = ud.use_transform ? transform : m4f::scaling(1, 1, 1),
+            .mvp = mvp,
             .time = ud.total_seconds
         };
 
@@ -138,16 +159,25 @@ int main()
 
         draw_limits_window(ctx.limits.adapter, ctx.limits.device);
 
-        if( ImGui::Begin("transform") )
+        if( ImGui::Begin("projection") )
         {
             if(ImGui::Button(ud.use_transform ? "Using transform" : "Not using transform"))
                 ud.use_transform = !ud.use_transform;
-            ImGui::SliderFloat("depth", &ud.depth, 0, 400);
+            if(ImGui::Button(use_mmodel ? "Using mmodel" : "Not using mmodel"))
+                use_mmodel = !use_mmodel;
+            if(ImGui::Button(use_mview ? "Using mview" : "Not using mview"))
+                use_mview = !use_mview;
+            ImGui::SliderFloat("near", &ud.near, 0.01, 10);
+            ImGui::SliderFloat("far", &ud.far, 0, 100);
+            ImGui::SliderFloat("focal_len", &ud.focal_len, 0, 10);
             ImGui::SliderFloat3("pos", ud.translation, -1, 1);
             ImGui::SliderFloat3("rot", ud.rotation, -3.14, 3.14);
             ImGui::SliderFloat3("sca", ud.scale, 0, 2);
 
-            draw_matrix(transform, "Transform", "##transform");
+            draw_matrix(mvp, "mvp", "##mvp");
+            draw_matrix(mprojection, "MProjection", "##mprojection");
+            draw_matrix(mmodel, "MModel", "##mmodel");
+            draw_matrix(mview, "MView", "##mview");
         }
         ImGui::End();
 
@@ -156,19 +186,34 @@ int main()
 
         auto encoder = ctx.device.createCommandEncoder({{ .nextInChain = nullptr, .label = "Command Encoder" }});
 
-        auto color_attachment = wgpu::RenderPassColorAttachment{{
+        const auto color_attachment = wgpu::RenderPassColorAttachment{{
             .view = next_texture,
             .resolveTarget = nullptr,
             .loadOp = WGPULoadOp_Clear,
             .storeOp = WGPUStoreOp_Store,
             .clearValue = WGPUColor{ 0.9, 0.1, 0.2, 1.0 }
         }};
+        const auto depth_attachment = wgpu::RenderPassDepthStencilAttachment({
+            .view = ctx.depth_texture_view,
+            // Operation settings comparable to the color attachment
+            .depthLoadOp = wgpu::LoadOp::Clear,
+            .depthStoreOp = wgpu::StoreOp::Store,
+            // The initial value of the depth buffer, meaning "far"
+            .depthClearValue = 1.0f,
+            // we could turn off writing to the depth buffer globally here
+            .depthReadOnly = false,
+            // Stencil setup, mandatory but unused
+            .stencilLoadOp = wgpu::LoadOp::Clear,
+            .stencilStoreOp = wgpu::StoreOp::Store,
+            .stencilClearValue = 0,
+            .stencilReadOnly = true,
+        });
         auto render_pass = encoder.beginRenderPass({{
             .nextInChain = nullptr,
             .label = "wgpu-test-render-pass",
             .colorAttachmentCount = 1,
             .colorAttachments = &color_attachment,
-            .depthStencilAttachment = nullptr,
+            .depthStencilAttachment = &depth_attachment,
             .occlusionQuerySet = nullptr,
             .timestampWriteCount = 0,
             .timestampWrites = nullptr
@@ -270,7 +315,7 @@ auto draw_matrix(m4f const& m, const char* panelname, const char* tablename) -> 
     for(auto i = 0; i < 4; ++i) {
         for(auto j = 0; j < 4; ++j) {
             ImGui::TableNextColumn();
-            ImGui::Text("%.3f", m.raw[i][j]);
+            ImGui::Text("%.6f", m.raw[i][j]);
     }}
     ImGui::EndTable();
     ImGui::EndGroupPanel();
