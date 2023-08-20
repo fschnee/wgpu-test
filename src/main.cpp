@@ -264,7 +264,9 @@ int main()
         render_pass.setVertexBuffer(1, ctx.color_buffer, 0, ud.color_data.size() * sizeof(float));
         render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, ud.normal_data.size() * sizeof(float));
         render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, ud.index_data.size() * sizeof(u16));
-        render_pass.setBindGroup(0, ctx.bind_group, 0, nullptr);
+        render_pass.setBindGroup(0, ctx.scene_bind_group, 0, nullptr);
+
+        render_pass.setBindGroup(1, ctx.object_bind_group, 0, nullptr);
         render_pass.drawIndexed(ud.index_data.size(), 1, 0, 0, 0);
         ctx.imgui_render(render_pass);
         render_pass.end();

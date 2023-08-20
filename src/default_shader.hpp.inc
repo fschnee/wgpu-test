@@ -15,8 +15,7 @@ struct object_uniforms
 };
 
 @group(0) @binding(0) var<uniform> s: scene_uniforms;
-// TODO: move object_uniforms to another binding GROUP not BINDING.
-@group(0) @binding(1) var<uniform> o: object_uniforms;
+@group(1) @binding(0) var<uniform> o: object_uniforms;
 
 struct VertIn
 {

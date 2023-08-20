@@ -19,7 +19,8 @@ struct wgpudesc
     std::optional<WGPURequiredLimits> device_limits = std::nullopt;
 
     WGPUBindGroupLayoutEntry binding_layouts[3];
-    WGPUBindGroupLayoutDescriptor binding_descriptor;
+    WGPUBindGroupLayoutDescriptor scene_binding_descriptor;
+    WGPUBindGroupLayoutDescriptor object_binding_descriptor;
     WGPUPipelineLayoutDescriptor pipeline_layout;
 
     WGPUSamplerDescriptor sampler;
@@ -39,7 +40,8 @@ struct wgpudesc
     WGPUBufferDescriptor scene_uniform_buffer = {};
     WGPUBufferDescriptor object_uniform_buffer = {};
     WGPUBindGroupEntry bindings[3];
-    WGPUBindGroupDescriptor bind_group_descriptor = {};
+    WGPUBindGroupDescriptor scene_bind_group_descriptor = {};
+    WGPUBindGroupDescriptor object_bind_group_descriptor = {};
 
     WGPUBufferDescriptor index_buffer = {};
 
@@ -79,9 +81,10 @@ struct context
     wgpu::Adapter adapter = {nullptr};
     wgpu::Device device = {nullptr};
     wgpu::Sampler sampler = {nullptr};
-    wgpu::BindGroupLayout bind_group_layout = {nullptr};
+    wgpu::BindGroupLayout bind_group_layouts[2] = {{nullptr}, {nullptr}};
     wgpu::PipelineLayout pipeline_layout = {nullptr};
-    wgpu::BindGroup bind_group = {nullptr};
+    wgpu::BindGroup scene_bind_group = {nullptr};
+    wgpu::BindGroup object_bind_group = {nullptr};
     wgpu::Buffer scene_uniform_buffer = {nullptr};
     wgpu::Buffer object_uniform_buffer = {nullptr};
     wgpu::Buffer vertex_buffer = {nullptr};

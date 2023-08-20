@@ -205,12 +205,12 @@ auto context::init_all() -> context&
     };
 
     this->desc.binding_layouts[1] = {
-        .binding = 1,
-        // The stage that needs to access this resource
+        .binding = 0,
         .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
         .buffer = {
             .type = wgpu::BufferBindingType::Uniform,
-            .minBindingSize = sizeof(object_uniforms)
+            .hasDynamicOffset = false,
+            .minBindingSize = sizeof(object_uniforms),
         }
     };
 
@@ -222,16 +222,23 @@ auto context::init_all() -> context&
     //};
 
     // Create a bind group layout
-    this->desc.binding_descriptor = {
-        .entryCount = 2,
+    this->desc.scene_binding_descriptor = {
+        .entryCount = 1,
         .entries = this->desc.binding_layouts
     };
-    std::cout << "[wgpu] Creating uniform bind group " << this->desc.binding_layouts[0].binding << " layout ..." << std::endl;
-    this->bind_group_layout = device.createBindGroupLayout(this->desc.binding_descriptor);
-    std::cout << "\t" << this->bind_group_layout << std::endl;
+    this->desc.object_binding_descriptor = {
+        .entryCount = 1,
+        .entries = &this->desc.binding_layouts[1]
+    };
+    std::cout << "[wgpu] Creating uniform bind group " << this->desc.binding_layouts[0].binding << " (scene) layout ..." << std::endl;
+    this->bind_group_layouts[0] = device.createBindGroupLayout(this->desc.scene_binding_descriptor);
+    std::cout << "\t" << this->bind_group_layouts[0] << std::endl;
+    std::cout << "[wgpu] Creating uniform bind group " << this->desc.binding_layouts[1].binding << " (object) layout ..." << std::endl;
+    this->bind_group_layouts[1] = device.createBindGroupLayout(this->desc.object_binding_descriptor);
+    std::cout << "\t" << this->bind_group_layouts[1] << std::endl;
     this->desc.pipeline_layout = {
-        .bindGroupLayoutCount = 1,
-        .bindGroupLayouts = (WGPUBindGroupLayout*)&this->bind_group_layout
+        .bindGroupLayoutCount = 2,
+        .bindGroupLayouts = (WGPUBindGroupLayout*)this->bind_group_layouts
     };
     std::cout << "[wgpu] Creating pipeline layout..." << std::endl;
     this->pipeline_layout = device.createPipelineLayout(this->desc.pipeline_layout);
@@ -381,7 +388,7 @@ auto context::init_all() -> context&
     };
 
     this->desc.bindings[1] = {
-        .binding = 1,
+        .binding = 0,
         .buffer = this->object_uniform_buffer,
         .offset = 0,
         .size = this->desc.object_uniform_buffer.size,
@@ -405,14 +412,23 @@ auto context::init_all() -> context&
     //    .sampler = this->sampler
     //};
 
-    this->desc.bind_group_descriptor = {
-        .layout = this->bind_group_layout,
-        .entryCount = this->desc.binding_descriptor.entryCount,
+    this->desc.scene_bind_group_descriptor = {
+        .layout = this->bind_group_layouts[0],
+        .entryCount = this->desc.scene_binding_descriptor.entryCount,
         .entries = this->desc.bindings
     };
-    std::cout << "[wgpu] Creating Bind Group..." << std::endl;
-    this->bind_group = device.createBindGroup(this->desc.bind_group_descriptor);
-    std::cout << "\t" << this->bind_group << std::endl;
+    std::cout << "[wgpu] Creating scene Bind Group..." << std::endl;
+    this->scene_bind_group = device.createBindGroup(this->desc.scene_bind_group_descriptor);
+    std::cout << "\t" << this->scene_bind_group << std::endl;
+
+    this->desc.object_bind_group_descriptor = {
+        .layout = this->bind_group_layouts[1],
+        .entryCount = this->desc.object_binding_descriptor.entryCount,
+        .entries = &this->desc.bindings[1]
+    };
+    std::cout << "[wgpu] Creating object Bind Group..." << std::endl;
+    this->object_bind_group = device.createBindGroup(this->desc.object_bind_group_descriptor);
+    std::cout << "\t" << this->object_bind_group << std::endl;
 
     std::cout << "[wgpu] Creating Depth Texture..." << std::endl;
     this->desc.depth_texture = {
