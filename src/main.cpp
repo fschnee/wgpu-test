@@ -62,22 +62,64 @@ int main()
             +0.5, -0.5, -0.3,
             +0.5, +0.5, -0.3,
             -0.5, +0.5, -0.3,
-            +0.0, +0.0, +0.5
+            -0.5, -0.5, -0.3,
+            +0.5, -0.5, -0.3,
+            +0.0, +0.0, +0.5,
+            +0.5, -0.5, -0.3,
+            +0.5, +0.5, -0.3,
+            +0.0, +0.0, +0.5,
+            +0.5, +0.5, -0.3,
+            -0.5, +0.5, -0.3,
+            +0.0, +0.0, +0.5,
+            -0.5, +0.5, -0.3,
+            -0.5, -0.5, -0.3,
+            +0.0, +0.0, +0.5,
         };
         std::vector<float> color_data = {
             1.0, 1.0, 1.0,
             1.0, 1.0, 1.0,
             1.0, 1.0, 1.0,
             1.0, 1.0, 1.0,
-            0.5, 0.5, 0.5
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+            1.0, 1.0, 1.0,
+        };
+        std::vector<float> normal_data = {
+             0.0,   -1.0,   0.0,
+             0.0,   -1.0,   0.0,
+             0.0,   -1.0,   0.0,
+             0.0,   -1.0,   0.0,
+             0.0,   -0.848, 0.53,
+             0.0,   -0.848, 0.53,
+             0.0,   -0.848, 0.53,
+             0.848, 0.0,    0.53,
+             0.848, 0.0,    0.53,
+             0.848, 0.0,    0.53,
+             0.0,   0.848,  0.53,
+             0.0,   0.848,  0.53,
+             0.0,   0.848,  0.53,
+            -0.848, 0.0,    0.53,
+            -0.848, 0.0,    0.53,
+            -0.848, 0.0,    0.53,
         };
         std::vector<u16> index_data = {
-            0, 1, 2,
-            0, 2, 3,
-            0, 1, 4,
-            1, 2, 4,
-            2, 3, 4,
-            3, 0, 4
+            // Base
+             0,  1,  2,
+             0,  2,  3,
+            // Sides
+             4,  5,  6,
+             7,  8,  9,
+            10, 11, 12,
+            13, 14, 15,
         };
         bool geometry_changed = true;
     } ud = userdata{};
@@ -93,6 +135,7 @@ int main()
             auto queue = ctx.device.getQueue();
             queue.writeBuffer(ctx.vertex_buffer, 0, ud.vertex_data.data(), ud.vertex_data.size() * sizeof(float));
             queue.writeBuffer(ctx.color_buffer,  0, ud.color_data.data(),  ud.color_data.size()  * sizeof(float));
+            queue.writeBuffer(ctx.normal_buffer, 0, ud.normal_data.data(), ud.normal_data.size() * sizeof(float));
             queue.writeBuffer(ctx.index_buffer,  0, ud.index_data.data(),  ud.index_data.size()  * sizeof(u16));
             ud.geometry_changed = false;
         }
@@ -122,6 +165,7 @@ int main()
             .view = mview,
             .projection = mprojection,
             .time = ud.total_seconds,
+            .gamma = 2.2,
         };
 
         const auto object_uniforms = context::object_uniforms{
@@ -183,7 +227,7 @@ int main()
             .resolveTarget = nullptr,
             .loadOp = WGPULoadOp_Clear,
             .storeOp = WGPUStoreOp_Store,
-            .clearValue = WGPUColor{ 0.9, 0.1, 0.2, 1.0 }
+            .clearValue = WGPUColor{ 0.05, 0.05, 0.05, 1.0 }
         }};
         const auto depth_attachment = wgpu::RenderPassDepthStencilAttachment({
             .view = ctx.depth_texture_view,
@@ -214,6 +258,7 @@ int main()
         render_pass.setPipeline(ctx.pipeline);
         render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, ud.vertex_data.size() * sizeof(float));
         render_pass.setVertexBuffer(1, ctx.color_buffer, 0, ud.color_data.size() * sizeof(float));
+        render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, ud.normal_data.size() * sizeof(float));
         render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, ud.index_data.size() * sizeof(u16));
         render_pass.setBindGroup(0, ctx.bind_group, 0, nullptr);
         render_pass.drawIndexed(ud.index_data.size(), 1, 0, 0, 0);

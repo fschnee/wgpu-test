@@ -247,6 +247,11 @@ auto context::init_all() -> context&
         .offset = 0,
         .shaderLocation = 1, // @location(1).
     });
+    this->desc.vertex_buffer_attributes.push_back({
+        .format = wgpu::VertexFormat::Float32x3,
+        .offset = 0,
+        .shaderLocation = 2, // @location(2)
+    });
     this->desc.vertex_buffer_layouts.push_back({
         .arrayStride = 3 * sizeof(float), // xyz
         .stepMode = wgpu::VertexStepMode::Vertex,
@@ -258,6 +263,12 @@ auto context::init_all() -> context&
         .stepMode = wgpu::VertexStepMode::Vertex,
         .attributeCount = 1,
         .attributes = &this->desc.vertex_buffer_attributes[1],
+    });
+    this->desc.vertex_buffer_layouts.push_back({
+        .arrayStride = 3 * sizeof(float), // nx, ny, nz
+        .stepMode = wgpu::VertexStepMode::Vertex,
+        .attributeCount = 1,
+        .attributes = &this->desc.vertex_buffer_attributes[2]
     });
 
     auto depth_stencil_state_helper = wgpu::DepthStencilState{};
@@ -319,6 +330,15 @@ auto context::init_all() -> context&
     };
     this->color_buffer = device.createBuffer(this->desc.color_buffer);
     std::cout << "\t" << this->color_buffer << std::endl;
+
+    std::cout << "[wgpu] Creating normal buffer..." << std::endl;
+    this->desc.normal_buffer = {
+        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Vertex,
+        .size  = this->desc.vertex_buffer.size,
+        .mappedAtCreation = false,
+    };
+    this->normal_buffer = device.createBuffer(this->desc.normal_buffer);
+    std::cout << "\t" << this->normal_buffer << std::endl;
 
     std::cout << "[wgpu] Creating index buffer..." << std::endl;
     this->desc.index_buffer = {

@@ -45,6 +45,7 @@ struct wgpudesc
 
     WGPUBufferDescriptor vertex_buffer = {};
     WGPUBufferDescriptor color_buffer = {};
+    WGPUBufferDescriptor normal_buffer = {};
     std::vector<WGPUVertexBufferLayout> vertex_buffer_layouts = {};
     std::vector<WGPUVertexAttribute> vertex_buffer_attributes = {};
 
@@ -85,6 +86,7 @@ struct context
     wgpu::Buffer object_uniform_buffer = {nullptr};
     wgpu::Buffer vertex_buffer = {nullptr};
     wgpu::Buffer color_buffer = {nullptr};
+    wgpu::Buffer normal_buffer = {nullptr};
     wgpu::Buffer index_buffer = {nullptr};
     wgpu::SwapChain swapchain = {nullptr};
     wgpu::RenderPipeline pipeline = {nullptr};
@@ -101,8 +103,9 @@ struct context
         m4f view;
         m4f projection;
         float time;
+        float gamma;
 
-        float _pad[3];
+        float _pad[2];
     };
 
     // Changes per-object.
