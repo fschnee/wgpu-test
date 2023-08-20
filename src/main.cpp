@@ -46,14 +46,14 @@ int main()
         u32 nw = 1280;
         u32 nh = 640;
 
-        // Perspective stuff.
+        // Perspective transform stuff.
         float focal_len = 2.0;
         float near = 0.01;
         float far  = 100;
+        // View transform stuff.
         float translation[3] = {0, 0, 0};
         float rotation[3] = {0, 0, 0};
         float scale[3] = {1, 1, 1};
-        bool use_transform = true;
 
         float total_seconds = 0.0f;
 
@@ -118,19 +118,18 @@ int main()
 	    auto mview = m4f::translation(0, 0, 2)
             .xRotate(-3.0f * M_PI / 4.0f);
 
-        static bool use_mmodel = true;
-        static bool use_mview = true;
-
-        auto mvp = ud.use_transform ? mprojection : m4f::scaling(1, 1, 1);
-        mvp = use_mview ? mvp.dot(mview) : mvp;
-        mvp = use_mmodel ? mvp.dot(mmodel) : mvp;
-
-        const auto uniform = context::uniforms{
-            .mvp = mvp,
-            .time = ud.total_seconds
+        const auto scene_uniforms = context::scene_uniforms{
+            .view = mview,
+            .projection = mprojection,
+            .time = ud.total_seconds,
         };
 
-        ctx.device.getQueue().writeBuffer(ctx.uniform_buffer, 0, &uniform, sizeof(uniform));
+        const auto object_uniforms = context::object_uniforms{
+            .transform = mmodel,
+        };
+
+        ctx.device.getQueue().writeBuffer(ctx.scene_uniform_buffer, 0, &scene_uniforms, sizeof(scene_uniforms));
+        ctx.device.getQueue().writeBuffer(ctx.object_uniform_buffer, 0, &object_uniforms, sizeof(object_uniforms));
         ctx.imgui_new_frame();
 
         /*
@@ -161,12 +160,6 @@ int main()
 
         if( ImGui::Begin("projection") )
         {
-            if(ImGui::Button(ud.use_transform ? "Using transform" : "Not using transform"))
-                ud.use_transform = !ud.use_transform;
-            if(ImGui::Button(use_mmodel ? "Using mmodel" : "Not using mmodel"))
-                use_mmodel = !use_mmodel;
-            if(ImGui::Button(use_mview ? "Using mview" : "Not using mview"))
-                use_mview = !use_mview;
             ImGui::SliderFloat("near", &ud.near, 0.01, 10);
             ImGui::SliderFloat("far", &ud.far, 0, 100);
             ImGui::SliderFloat("focal_len", &ud.focal_len, 0, 10);
@@ -174,7 +167,6 @@ int main()
             ImGui::SliderFloat3("rot", ud.rotation, -3.14, 3.14);
             ImGui::SliderFloat3("sca", ud.scale, 0, 2);
 
-            draw_matrix(mvp, "mvp", "##mvp");
             draw_matrix(mprojection, "MProjection", "##mprojection");
             draw_matrix(mmodel, "MModel", "##mmodel");
             draw_matrix(mview, "MView", "##mview");

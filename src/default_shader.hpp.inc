@@ -1,11 +1,18 @@
 R"(
-struct uniforms
+struct scene_uniforms
 {
-    mvp: mat4x4<f32>,
+    view: mat4x4<f32>,
+    projection: mat4x4<f32>,
     time: f32,
 };
 
-@group(0) @binding(0) var<uniform> u: uniforms;
+struct object_uniforms
+{
+    transform: mat4x4<f32>
+};
+
+@group(0) @binding(0) var<uniform> s: scene_uniforms;
+@group(0) @binding(1) var<uniform> o: object_uniforms;
 
 struct VertIn
 {
@@ -23,10 +30,10 @@ struct FragIn
 @vertex
 fn vert(in: VertIn) -> FragIn
 {
-    var o: FragIn;
-    o.position = u.mvp * vec4f(in.position, 1.0);
-    o.color    = in.color;
-    return o;
+    var out: FragIn;
+    out.position = s.projection * s.view * o.transform * vec4f(in.position, 1.0);
+    out.color    = in.color;
+    return out;
 }
 
 @fragment

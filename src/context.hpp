@@ -36,7 +36,8 @@ struct wgpudesc
     WGPUColorTargetState color_target = {};
     WGPUFragmentState fragment_state = {};
 
-    WGPUBufferDescriptor uniform_buffer = {};
+    WGPUBufferDescriptor scene_uniform_buffer = {};
+    WGPUBufferDescriptor object_uniform_buffer = {};
     WGPUBindGroupEntry bindings[3];
     WGPUBindGroupDescriptor bind_group_descriptor = {};
 
@@ -80,7 +81,8 @@ struct context
     wgpu::BindGroupLayout bind_group_layout = {nullptr};
     wgpu::PipelineLayout pipeline_layout = {nullptr};
     wgpu::BindGroup bind_group = {nullptr};
-    wgpu::Buffer uniform_buffer = {nullptr};
+    wgpu::Buffer scene_uniform_buffer = {nullptr};
+    wgpu::Buffer object_uniform_buffer = {nullptr};
     wgpu::Buffer vertex_buffer = {nullptr};
     wgpu::Buffer color_buffer = {nullptr};
     wgpu::Buffer index_buffer = {nullptr};
@@ -93,12 +95,20 @@ struct context
 
     wgpulimits limits = {};
 
-    struct uniforms
+    // Same for all objects within a scene.
+    struct scene_uniforms
     {
-        m4f mvp;
+        m4f view;
+        m4f projection;
         float time;
 
         float _pad[3];
+    };
+
+    // Changes per-object.
+    struct object_uniforms
+    {
+        m4f transform;
     };
 
     auto init_instance()

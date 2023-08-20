@@ -200,7 +200,17 @@ auto context::init_all() -> context&
         .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
         .buffer = {
             .type = wgpu::BufferBindingType::Uniform,
-            .minBindingSize = sizeof(uniforms)
+            .minBindingSize = sizeof(scene_uniforms)
+        }
+    };
+
+    this->desc.binding_layouts[1] = {
+        .binding = 1,
+        // The stage that needs to access this resource
+        .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
+        .buffer = {
+            .type = wgpu::BufferBindingType::Uniform,
+            .minBindingSize = sizeof(object_uniforms)
         }
     };
 
@@ -213,7 +223,7 @@ auto context::init_all() -> context&
 
     // Create a bind group layout
     this->desc.binding_descriptor = {
-        .entryCount = 1,
+        .entryCount = 2,
         .entries = this->desc.binding_layouts
     };
     std::cout << "[wgpu] Creating uniform bind group " << this->desc.binding_layouts[0].binding << " layout ..." << std::endl;
@@ -320,23 +330,41 @@ auto context::init_all() -> context&
     this->index_buffer = device.createBuffer(this->desc.index_buffer);
     std::cout << "\t" << this->index_buffer << std::endl;
 
-    std::cout << "[wgpu] Creating uniform buffer..." << std::endl;
-	this->desc.uniform_buffer = {
+    std::cout << "[wgpu] Creating scene uniform buffer..." << std::endl;
+	this->desc.scene_uniform_buffer = {
         .nextInChain = nullptr,
-        .label = "uniform buffer",
+        .label = "scene uniform buffer",
+        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform,
+        .size = sizeof(context::scene_uniforms),
+        .mappedAtCreation = false
+    };
+    this->scene_uniform_buffer = device.createBuffer(this->desc.scene_uniform_buffer);
+    std::cout << "\t" << this->scene_uniform_buffer << std::endl;
+
+    std::cout << "[wgpu] Creating object uniform buffer..." << std::endl;
+	this->desc.object_uniform_buffer = {
+        .nextInChain = nullptr,
+        .label = "object uniform buffer",
         .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform,
         .size = this->desc.device_limits->limits.maxUniformBufferBindingSize,
         .mappedAtCreation = false
     };
-    this->uniform_buffer = device.createBuffer(this->desc.uniform_buffer);
-    std::cout << "\t" << this->uniform_buffer << std::endl;
+    this->object_uniform_buffer = device.createBuffer(this->desc.object_uniform_buffer);
+    std::cout << "\t" << this->object_uniform_buffer << std::endl;
 
     // Uniform.
 	this->desc.bindings[0] = {
 	    .binding = 0,
-	    .buffer = this->uniform_buffer,
+	    .buffer = this->scene_uniform_buffer,
     	.offset = 0,
-    	.size = this->desc.device_limits->limits.maxUniformBufferBindingSize
+    	.size = this->desc.scene_uniform_buffer.size
+    };
+
+    this->desc.bindings[1] = {
+        .binding = 1,
+        .buffer = this->object_uniform_buffer,
+        .offset = 0,
+        .size = this->desc.object_uniform_buffer.size,
     };
 
     //this->desc.sampler = {
@@ -352,8 +380,8 @@ auto context::init_all() -> context&
 	//    .maxAnisotropy = 1
     //};
 	//this->sampler = this->device.createSampler(this->desc.sampler);
-    //this->desc.bindings[1] = {
-    //    .binding = 1,
+    //this->desc.bindings[2] = {
+    //    .binding = 2,
     //    .sampler = this->sampler
     //};
 
