@@ -47,7 +47,7 @@ fn frag(in: FragIn) -> @location(0) vec4f
 {
     let shading      = dot(normalize(s.light_direction), in.normal) * s.light_color;
     let color        = in.color * shading;
-    //let linear_color = pow(color, vec3f(s.gamma));
-    return vec4f(color, 1.0);
+    let linear_color = pow(color, vec3f(s.gamma));
+    return vec4f(linear_color, 1.0);
 }
 )"

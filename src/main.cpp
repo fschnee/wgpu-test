@@ -1,6 +1,11 @@
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 
 #include <filesystem>
+#include <functional>
+#include <string>
+#include <vector>
+#include <array>
 
 #include <rapidobj/rapidobj.hpp>
 
@@ -11,10 +16,9 @@
 
 #include "webgpu.hpp"
 #include "context.hpp"
+#include "m.hpp"
 
 #include "standalone/all.hpp"
-
-#include "m.hpp"
 
 #ifdef __EMSCRIPTEN__
     #define IS_NATIVE false
@@ -41,8 +45,39 @@ int main()
     });
     if(!ok) return 1;
 
-    struct userdata {
-        bool zep_has_init = false;
+    using vecf = std::vector<float>;
+    using vecu = std::vector<u16>;
+    using vec3f = std::array<float, 3>;
+
+    struct object
+    {
+        std::string name = "";
+
+        vecf vertex_data = {};
+        vecf color_data = {};
+        vecf normal_data = {};
+        vecu index_data = {};
+
+        vec3f origin = {0, 0, 0};
+        vec3f pos    = {0, 0, 0};
+        vec3f rot    = {0, 0, 0}; // In radians.
+        vec3f scale  = {1, 1, 1};
+
+        std::function<void(float dt, object& self)> on_update = [](auto, auto){};
+
+        // You can override this if you *really* want to, but you normally shouldn't.
+        std::function<m4f(object const&)> compute_transform = [](auto& self){
+            return m4f::translation(self.pos[0], self.pos[1], self.pos[2])
+                .xRotate(self.rot[0])
+                .yRotate(self.rot[1])
+                .zRotate(self.rot[2])
+                .scale(self.scale[0], self.scale[1], self.scale[2])
+                .translate(self.origin[0], self.origin[1], self.origin[2]);
+        };
+    };
+
+    struct userdata
+    {
         u32 nw = 1280;
         u32 nh = 640;
 
@@ -50,14 +85,23 @@ int main()
         float focal_len = 2.0;
         float near = 0.01;
         float far  = 100;
-        // View transform stuff.
-        float translation[3] = {0, 0, 0};
-        float rotation[3] = {0, 0, 0};
-        float scale[3] = {1, 1, 1};
+        // View transform (camera) stuff + geometry data from
+        // all objects that updates every time geometry changes = true.
+        object scene = {
+            .pos = {0.0f, 0.0f, 2.0f},
+            .rot = {-3.0f * M_PI / 4.0f, 0.0f, 0.0f},
+        };
+        bool geometry_changed = false;
 
         float total_seconds = 0.0f;
 
-        std::vector<float> vertex_data = {
+        std::vector<object> objects;
+    } ud = userdata{};
+
+    ud.geometry_changed = true;
+
+    auto p = object{
+        .vertex_data = {
             -0.5, -0.5, -0.3,
             +0.5, -0.5, -0.3,
             +0.5, +0.5, -0.3,
@@ -74,8 +118,8 @@ int main()
             -0.5, +0.5, -0.3,
             -0.5, -0.5, -0.3,
             +0.0, +0.0, +0.5,
-        };
-        std::vector<float> color_data = {
+        },
+        .color_data = {
             1.0, 1.0, 1.0,
             1.0, 1.0, 1.0,
             1.0, 1.0, 1.0,
@@ -92,8 +136,8 @@ int main()
             1.0, 1.0, 1.0,
             1.0, 1.0, 1.0,
             1.0, 1.0, 1.0,
-        };
-        std::vector<float> normal_data = {
+        },
+        .normal_data = {
              0.0,   -1.0,   0.0,
              0.0,   -1.0,   0.0,
              0.0,   -1.0,   0.0,
@@ -110,8 +154,8 @@ int main()
             -0.848, 0.0,    0.53,
             -0.848, 0.0,    0.53,
             -0.848, 0.0,    0.53,
-        };
-        std::vector<u16> index_data = {
+        },
+        .index_data = {
             // Base
              0,  1,  2,
              0,  2,  3,
@@ -120,9 +164,23 @@ int main()
              7,  8,  9,
             10, 11, 12,
             13, 14, 15,
-        };
-        bool geometry_changed = true;
-    } ud = userdata{};
+        },
+        //.origin = {0.5f, 0.0f, 0.0f},
+        //.scale  = {0.3f, 0.3f, 0.3f},
+        /* .on_update = [](auto dt, auto self){
+                self.rotation += m4f::zRotation(dt);
+            }
+        }*/
+    };
+
+    p.name = "Pyramid";
+    p.compute_transform = [](auto& self){
+        return m4f::zRotation(self.rot[2])
+            .translate(0.5, 0.0, 0.0) // invert origin and scale operation order and hardcode values.
+            .scale(0.3, 0.3, 0.3);
+    };
+    p.on_update = [](auto dt, auto& self) { self.rot[2] += dt; };
+    ud.objects.push_back(p);
 
     ctx.loop(&ud, [](auto dt, auto ctx, auto* _ud)
     {
@@ -130,40 +188,42 @@ int main()
 
         ud.total_seconds += dt;
 
+        auto queue = ctx.device.getQueue();
+
         if(ud.geometry_changed)
         {
-            auto queue = ctx.device.getQueue();
-            queue.writeBuffer(ctx.vertex_buffer, 0, ud.vertex_data.data(), ud.vertex_data.size() * sizeof(float));
-            queue.writeBuffer(ctx.color_buffer,  0, ud.color_data.data(),  ud.color_data.size()  * sizeof(float));
-            queue.writeBuffer(ctx.normal_buffer, 0, ud.normal_data.data(), ud.normal_data.size() * sizeof(float));
-            queue.writeBuffer(ctx.index_buffer,  0, ud.index_data.data(),  ud.index_data.size()  * sizeof(u16));
+            // Rebuild the scene geometry.
+            ud.scene.vertex_data.clear();
+            ud.scene.color_data.clear();
+            ud.scene.normal_data.clear();
+            ud.scene.index_data.clear();
+            for(const auto& obj : ud.objects)
+            {
+                ud.scene.vertex_data.insert(ud.scene.vertex_data.end(), obj.vertex_data.begin(), obj.vertex_data.end());
+                ud.scene.color_data.insert(ud.scene.color_data.end(),   obj.color_data.begin(),  obj.color_data.end());
+                ud.scene.normal_data.insert(ud.scene.normal_data.end(), obj.normal_data.begin(), obj.normal_data.end());
+                ud.scene.index_data.insert(ud.scene.index_data.end(),   obj.index_data.begin(),  obj.index_data.end());
+            }
+
+            // And upload it to the gpu.
+            queue.writeBuffer(ctx.vertex_buffer, 0, ud.scene.vertex_data.data(), ud.scene.vertex_data.size() * sizeof(float));
+            queue.writeBuffer(ctx.color_buffer,  0, ud.scene.color_data.data(),  ud.scene.color_data.size()  * sizeof(float));
+            queue.writeBuffer(ctx.normal_buffer, 0, ud.scene.normal_data.data(), ud.scene.normal_data.size() * sizeof(float));
+            queue.writeBuffer(ctx.index_buffer,  0, ud.scene.index_data.data(),  ud.scene.index_data.size()  * sizeof(u16));
             ud.geometry_changed = false;
         }
 
         if(ud.nw != ctx.w || ud.nh != ctx.h) { ctx.set_resolution(ud.nw, ud.nh); }
 
-        auto mprojection = m4f::perspective({
-                .focal_len = ud.focal_len,
-                .aspect_ratio = (ud.nw * cvt::to<float>) / (ud.nh * cvt::to<float>),
-                .near = ud.near,
-                .far = ud.far
-            });
-
-	    auto mmodel = m4f::zRotation(ud.total_seconds)
-            .translate(0.5, 0.0, 0.0)
-            .scale(0.3, 0.3, 0.3)
-            .translate(ud.translation[0], ud.translation[1], ud.translation[2])
-            .xRotate(ud.rotation[0])
-            .yRotate(ud.rotation[1])
-            .zRotate(ud.rotation[2])
-            .scale(ud.scale[0], ud.scale[1], ud.scale[2]);
-
-	    auto mview = m4f::translation(0, 0, 2)
-            .xRotate(-3.0f * M_PI / 4.0f);
-
+        ud.scene.on_update(dt, ud.scene);
         const auto scene_uniforms = context::scene_uniforms{
-            .view       = mview,
-            .projection = mprojection,
+            .view       = ud.scene.compute_transform(ud.scene),
+            .projection = m4f::perspective({
+                .focal_len    = ud.focal_len,
+                .aspect_ratio = (ud.nw * cvt::to<float>) / (ud.nh * cvt::to<float>),
+                .near         = ud.near,
+                .far          = ud.far
+            }),
 
             .light_direction = {0.2f, 0.4f, 0.3f},
             .light_color     = {1.0f, 0.9f, 0.6f},
@@ -171,55 +231,60 @@ int main()
             .time  = ud.total_seconds,
             .gamma = 2.2,
         };
-
-        const auto object_uniforms = context::object_uniforms{
-            .transform = mmodel,
-        };
-
         ctx.device.getQueue().writeBuffer(ctx.scene_uniform_buffer, 0, &scene_uniforms, sizeof(scene_uniforms));
-        ctx.device.getQueue().writeBuffer(ctx.object_uniform_buffer, 0, &object_uniforms, sizeof(object_uniforms));
+
+        // Doing object ticks and updating the uniform buffer.
+        for(auto i = 0_u64; i < ud.objects.size(); ++i)
+        {
+            auto& obj = ud.objects[i];
+
+            obj.on_update(dt, obj);
+            const auto object_uniform = context::object_uniforms{ .transform = obj.compute_transform(obj) };
+            ctx.device.getQueue().writeBuffer(
+                ctx.object_uniform_buffer,
+                i * ctx.object_uniform_stride,
+                &object_uniform,
+                sizeof(object_uniform)
+            );
+        }
+
+        // UI stuffs.
         ctx.imgui_new_frame();
+        { // Scope only for IDE collapsing purposes.
+            ImGui::BeginMainMenuBar();
+            {
+                auto frame_str = fmt::format("Verts: {} Frame {}: {:.1f} FPS -> {:.4f} MS", ud.scene.index_data.size() / 3, ctx.frame, 1 / dt, dt);
+                ImGui::SetCursorPosX(ImGui::GetWindowSize().x - ImGui::CalcTextSize(frame_str.c_str()).x -  ImGui::GetStyle().ItemSpacing.x);
+                ImGui::Text("%s", frame_str.c_str());
+                ImGui::SetCursorPosX(0);
 
-        /*
-        if(!ud.zep_has_init) {
-            zep_init({1.0f, 1.0f});
-            zep_load(std::filesystem::current_path() / "src" / "default_shader.hpp.inc");
-            ud.zep_has_init = true;
+                ImGui::PushItemWidth(100);
+                ImGui::InputInt("Width",  &ud.nw * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
+                ImGui::PushItemWidth(100);
+                ImGui::InputInt("Height", &ud.nh * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
+            }
+            ImGui::EndMainMenuBar();
+
+            draw_limits_window(ctx.limits.adapter, ctx.limits.device);
+
+            if( ImGui::Begin("projection") )
+            {
+                ImGui::SliderFloat("near", &ud.near, 0.01, 10);
+                ImGui::SliderFloat("far", &ud.far, 0, 100);
+                ImGui::SliderFloat("focal_len", &ud.focal_len, 0, 10);
+                ImGui::SliderFloat3("pos", ud.scene.pos.data(), -1, 1);
+                ImGui::SliderFloat3("rot", ud.scene.rot.data(), -3.14, 3.14);
+                ImGui::SliderFloat3("sca", ud.scene.scale.data(), 0, 2);
+
+                draw_matrix(scene_uniforms.projection, "Projection", "##projection");
+                draw_matrix(scene_uniforms.view, "View", "##view");
+                for(auto const& obj : ud.objects)
+                    draw_matrix(obj.compute_transform(obj), obj.name.c_str(), obj.name.c_str());
+            }
+            ImGui::End();
         }
-        zep_update();
-        zep_show({300, 300});
-        */
 
-        ImGui::BeginMainMenuBar();
-        {
-            auto frame_str = fmt::format("Verts/Indexes: {}/{} Frame {}: {:.1f} FPS -> {:.4f} MS", ud.vertex_data.size() / 3, ud.index_data.size() / 3, ctx.frame, 1/dt, dt);
-            ImGui::SetCursorPosX(ImGui::GetWindowSize().x - ImGui::CalcTextSize(frame_str.c_str()).x -  ImGui::GetStyle().ItemSpacing.x);
-            ImGui::Text("%s", frame_str.c_str());
-            ImGui::SetCursorPosX(0);
-
-            ImGui::PushItemWidth(100);
-            ImGui::InputInt("Width",  &ud.nw * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
-            ImGui::PushItemWidth(100);
-            ImGui::InputInt("Height", &ud.nh * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
-        }
-        ImGui::EndMainMenuBar();
-
-        draw_limits_window(ctx.limits.adapter, ctx.limits.device);
-
-        if( ImGui::Begin("projection") )
-        {
-            ImGui::SliderFloat("near", &ud.near, 0.01, 10);
-            ImGui::SliderFloat("far", &ud.far, 0, 100);
-            ImGui::SliderFloat("focal_len", &ud.focal_len, 0, 10);
-            ImGui::SliderFloat3("pos", ud.translation, -1, 1);
-            ImGui::SliderFloat3("rot", ud.rotation, -3.14, 3.14);
-            ImGui::SliderFloat3("sca", ud.scale, 0, 2);
-
-            draw_matrix(mprojection, "MProjection", "##mprojection");
-            draw_matrix(mmodel, "MModel", "##mmodel");
-            draw_matrix(mview, "MView", "##mview");
-        }
-        ImGui::End();
+        // Frame rendering stuff.
 
         auto next_texture = ctx.swapchain.getCurrentTextureView();
         if(!next_texture) return context::loop_message::do_break;
@@ -260,14 +325,23 @@ int main()
         }});
 
         render_pass.setPipeline(ctx.pipeline);
-        render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, ud.vertex_data.size() * sizeof(float));
-        render_pass.setVertexBuffer(1, ctx.color_buffer, 0, ud.color_data.size() * sizeof(float));
-        render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, ud.normal_data.size() * sizeof(float));
-        render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, ud.index_data.size() * sizeof(u16));
         render_pass.setBindGroup(0, ctx.scene_bind_group, 0, nullptr);
+        render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, ud.scene.vertex_data.size() * sizeof(float));
+        render_pass.setVertexBuffer(1, ctx.color_buffer,  0, ud.scene.color_data.size()  * sizeof(float));
+        render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, ud.scene.normal_data.size() * sizeof(float));
+        render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, ud.scene.index_data.size() * sizeof(u16));
 
-        render_pass.setBindGroup(1, ctx.object_bind_group, 0, nullptr);
-        render_pass.drawIndexed(ud.index_data.size(), 1, 0, 0, 0);
+        auto idx_offset = 0_u32;
+        auto vertex_offset = 0_i32;
+        auto dynamic_bind_offset = 0_u32;
+        for(auto const& obj : ud.objects)
+        {
+            render_pass.setBindGroup(1, ctx.object_bind_group, 1, &dynamic_bind_offset);
+            render_pass.drawIndexed(obj.index_data.size(), 1, idx_offset, vertex_offset, 0);
+            idx_offset          += obj.index_data.size();
+            vertex_offset       += obj.vertex_data.size();
+            dynamic_bind_offset += ctx.object_uniform_stride; // TODO: fixme.
+        }
         ctx.imgui_render(render_pass);
         render_pass.end();
 

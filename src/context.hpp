@@ -87,6 +87,7 @@ struct context
     wgpu::BindGroup object_bind_group = {nullptr};
     wgpu::Buffer scene_uniform_buffer = {nullptr};
     wgpu::Buffer object_uniform_buffer = {nullptr};
+    standalone::u32 object_uniform_stride;
     wgpu::Buffer vertex_buffer = {nullptr};
     wgpu::Buffer color_buffer = {nullptr};
     wgpu::Buffer normal_buffer = {nullptr};

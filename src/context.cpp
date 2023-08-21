@@ -193,6 +193,18 @@ auto context::init_all() -> context&
         .targets = &this->desc.color_target
     };
 
+    /**
+     * Round 'value' up to the next multiplier of 'step'.
+        */
+    constexpr auto ceil_to_next_multiple = [](u32 value, u32 step) -> u32 {
+        uint32_t divide_and_ceil = value / step + (value % step == 0 ? 0 : 1);
+        return step * divide_and_ceil;
+    };
+    this->object_uniform_stride = ceil_to_next_multiple(
+        sizeof(context::object_uniforms),
+        this->limits.device.limits.minUniformBufferOffsetAlignment
+    );
+
     // The binding index as used in the @binding attribute in the shader
     this->desc.binding_layouts[0] = {
         .binding = 0,
@@ -209,7 +221,7 @@ auto context::init_all() -> context&
         .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
         .buffer = {
             .type = wgpu::BufferBindingType::Uniform,
-            .hasDynamicOffset = false,
+            .hasDynamicOffset = true,
             .minBindingSize = sizeof(object_uniforms),
         }
     };
@@ -373,7 +385,7 @@ auto context::init_all() -> context&
         .nextInChain = nullptr,
         .label = "object uniform buffer",
         .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform,
-        .size = this->desc.device_limits->limits.maxUniformBufferBindingSize,
+        .size = this->object_uniform_stride * 200 /* objlimit = 200 */ + sizeof(object_uniforms),
         .mappedAtCreation = false
     };
     this->object_uniform_buffer = device.createBuffer(this->desc.object_uniform_buffer);
