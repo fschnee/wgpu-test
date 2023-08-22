@@ -101,29 +101,23 @@ struct context
 
     wgpulimits limits = {};
 
+    // https://mehmetoguzderin.github.io/webgpu/wgsl.html -> A structure inherits the worst-case alignment of any of its members.
+
     // Same for all objects within a scene.
-    struct scene_uniforms
+    struct alignas(64) scene_uniforms
     {
-        m4f view;
-        m4f projection;
-        std::array<float, 3> light_direction;
-
-        float _pad1;
-
-        std::array<float, 3> light_color;
-
-        float _pad2;
-
-        float time;
-        float gamma;
-
-        float _pad3[6];
+        alignas(64) m4f view;
+        alignas(64) m4f projection;
+        alignas(16) std::array<float, 3> light_direction;
+        alignas(16) std::array<float, 3> light_color;
+        alignas(4) float time;
+        alignas(4) float gamma;
     };
 
     // Changes per-object.
-    struct object_uniforms
+    struct alignas(64) object_uniforms
     {
-        m4f transform;
+        alignas(64) m4f transform;
     };
 
     auto init_instance()

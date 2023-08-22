@@ -77,30 +77,7 @@ auto context::init_all() -> context&
 
     this->desc.device_limits = {
         .nextInChain = nullptr,
-        .limits = {
-            // Max of laptop used for testing.
-            .maxTextureDimension1D = 8192,
-            .maxTextureDimension2D = 8192,
-            .maxTextureDimension3D = 2048,
-            .maxTextureArrayLayers = 256,
-	        .maxBindGroups = 4,
-            .maxDynamicUniformBuffersPerPipelineLayout = 8,
-            .maxDynamicStorageBuffersPerPipelineLayout = 4,
-            .maxSampledTexturesPerShaderStage = 16,
-            .maxSamplersPerShaderStage = 16,
-            .maxStorageBuffersPerShaderStage = 8,
-            .maxStorageTexturesPerShaderStage = 4,
-	        .maxUniformBuffersPerShaderStage = 12,
-	        .maxUniformBufferBindingSize = 65536,
-	        .maxStorageBufferBindingSize = 134217728,
-            .minUniformBufferOffsetAlignment = 256,
-	        .minStorageBufferOffsetAlignment = 256,
-	        .maxVertexBuffers = 8,
-	        .maxBufferSize = 1024*1024*256, // 256Mib.
-            .maxVertexAttributes = 16,
-	        .maxVertexBufferArrayStride = 2048,
-	        .maxInterStageShaderComponents = 116
-        }
+        .limits = this->limits.adapter.limits, // Request max supported of adapter for everything.
     };
 
     WGPURequiredLimits* device_limits = desc.device_limits ? &desc.device_limits.value() : nullptr;
