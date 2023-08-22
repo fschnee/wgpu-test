@@ -7,6 +7,8 @@
 #include <vector>
 #include <array>
 
+#include <omp.h>
+
 #include <rapidobj/rapidobj.hpp>
 
 #include <imgui.h>
@@ -48,19 +50,21 @@ int main()
 
     struct object
     {
-        using vecf = std::vector<float>;
-        using vecu = std::vector<u16>;
+        using vecf = std::vector<context::vertex_t>;
+        using vecidx = std::vector<context::index_t>;
         using f3x32 = std::array<float, 3>; // TODO: override me with custom struct with .xyz, .rgb, etc.
-        using on_update_t = std::function<void(float dt, object& self)>;
+        using on_tick_t = std::function<void(float dt, object& self)>;
 
         std::string name = "";
+        bool draw = true;
+        bool tick = true;
 
         struct mesh_t
         {
-            vecf vertex_data = {};
-            vecf color_data = {};
-            vecf normal_data = {};
-            vecu index_data = {};
+            vecf   vertex_data = {};
+            vecf   color_data = {};
+            vecf   normal_data = {};
+            vecidx index_data = {};
         } mesh;
 
         struct transform
@@ -76,13 +80,17 @@ int main()
             mesh_t mesh = {};
             transform world_transform = {};
             transform model_transform = {};
-            on_update_t on_update = [](auto, auto){};
+            on_tick_t on_tick = [](auto, auto){};
+            bool draw = true;
+            bool tick = true;
         };
 
         constexpr object(constructorargs&& args)
             : name{ s::move(args.name) }
+            , draw{ args.draw }
+            , tick{ args.tick }
             , mesh{ s::move(args.mesh) }
-            , on_update{ s::move(args.on_update) }
+            , on_tick{ s::move(args.on_tick) }
             , world_transform{ s::move(args.world_transform) }
             , model_transform{ s::move(args.model_transform) }
         {}
@@ -94,7 +102,7 @@ int main()
 
         constexpr auto look_at(f3x32 const& target)
         {
-            //TODO: Implementar. Só fazer this->mt().rot apontar target
+            //TODO: Implementar. Só fazer this->mt().rot apontar target - this->mt().pos
         }
 
         // This is heavy, please only call this if you *really* need to,
@@ -120,7 +128,7 @@ int main()
                 .scale(mt.scale[0], mt.scale[1], mt.scale[2]);
         };
 
-        on_update_t on_update = [](auto, auto){};
+        on_tick_t on_tick = [](auto, auto){};
 
     private:
         transform world_transform = {};
@@ -138,8 +146,11 @@ int main()
         u32 nw = 1280;
         u32 nh = 640;
 
+        float ticks_per_second = 120.0f;
+        float leftover_tick_seconds = 0.0f;
+
         // Perspective transform stuff.
-        float focal_len = 2.0;
+        float focal_len = 0.75;
         float near = 0.01;
         float far  = 100;
         // View transform (camera) stuff + geometry data from
@@ -147,7 +158,7 @@ int main()
         object scene = object{{
             .name = "scene",
             .world_transform = { .pos = {0.0, 0.0, 2.0}, .rot = {-3.0f * M_PI / 4.0f, 0.0f, 0.0f} },
-            .on_update = [
+            .on_tick = [
                     t = 0.0f,
                     currpoint = 0_u32,
                     path = std::vector<object::f3x32>{
@@ -260,15 +271,21 @@ int main()
         }
     }};
 
-    // TODO: fix multi-object crashing.
-    //p.name = "Pyramid";
-    //ud.objects.push_back(p);
 
     p.name = "Pyramid 2";
     p.wt().pos = {0.5f, 0.0f, 0.0f};
     p.wt().scale = {0.3f, 0.3f, 0.3f};
-    p.on_update = [](auto dt, auto& self) { self.wt().rot[2] += dt; };
+    p.on_tick = [](auto dt, auto& self) { self.wt().rot[2] += dt; };
+    p.draw = false;
     ud.objects.push_back(p);
+
+    p.name = "Pyramid";
+    p.wt().pos = {-1.5, 0.0f, -1.0f};
+    p.wt().scale = {1.0f, 1.0f, 1.0f};
+    p.on_tick = [](auto dt, auto& self) { self.wt().rot[1] += dt; };
+    p.draw = true;
+    ud.objects.push_back(p);
+
 
     ctx.loop(&ud, [](auto dt, auto ctx, auto* _ud)
     {
@@ -294,16 +311,31 @@ int main()
             }
 
             // And upload it to the gpu.
-            queue.writeBuffer(ctx.vertex_buffer, 0, ud.scene.mesh.vertex_data.data(), ud.scene.mesh.vertex_data.size() * sizeof(float));
-            queue.writeBuffer(ctx.color_buffer,  0, ud.scene.mesh.color_data.data(),  ud.scene.mesh.color_data.size()  * sizeof(float));
-            queue.writeBuffer(ctx.normal_buffer, 0, ud.scene.mesh.normal_data.data(), ud.scene.mesh.normal_data.size() * sizeof(float));
-            queue.writeBuffer(ctx.index_buffer,  0, ud.scene.mesh.index_data.data(),  ud.scene.mesh.index_data.size()  * sizeof(u16));
+            queue.writeBuffer(ctx.vertex_buffer, 0, ud.scene.mesh.vertex_data.data(), ud.scene.mesh.vertex_data.size() * sizeof(context::vertex_t));
+            queue.writeBuffer(ctx.color_buffer,  0, ud.scene.mesh.color_data.data(),  ud.scene.mesh.color_data.size()  * sizeof(context::vertex_t));
+            queue.writeBuffer(ctx.normal_buffer, 0, ud.scene.mesh.normal_data.data(), ud.scene.mesh.normal_data.size() * sizeof(context::vertex_t));
+            queue.writeBuffer(ctx.index_buffer,  0, ud.scene.mesh.index_data.data(),  ud.scene.mesh.index_data.size()  * sizeof(context::index_t));
             ud.geometry_changed = false;
         }
 
         if(ud.nw != ctx.w || ud.nh != ctx.h) { ctx.set_resolution(ud.nw, ud.nh); }
 
-        ud.scene.on_update(dt, ud.scene);
+        // Doing object ticks (fixed tick rate).
+        const auto tick_ms = 1 / ud.ticks_per_second;
+        ud.leftover_tick_seconds += dt;
+        auto ticks = 0_u64; // For debug purposes.
+        while(ud.leftover_tick_seconds >= tick_ms)
+        {
+            ++ticks;
+            ud.leftover_tick_seconds -= tick_ms;
+
+            // TODO: make me parallel by updating against scene snapshots.
+            if(ud.scene.tick) ud.scene.on_tick(tick_ms, ud.scene);
+            for(auto i = 0_u64; i < ud.objects.size(); ++i)
+                if(ud.objects[i].tick) ud.objects[i].on_tick(tick_ms, ud.objects[i]);
+        }
+
+        // Then updating the uniform buffers.
         const auto scene_uniforms = context::scene_uniforms{
             .view       = ud.scene.compute_transform(),
             .projection = m4f::perspective({
@@ -321,14 +353,11 @@ int main()
         };
         queue.writeBuffer(ctx.scene_uniform_buffer, 0, &scene_uniforms, sizeof(scene_uniforms));
 
-        // Doing object ticks.
-        // TODO: make me parallel by updating against scene snapshots.
-        for(auto i = 0_u64; i < ud.objects.size(); ++i) ud.objects[i].on_update(dt, ud.objects[i]);
-
-        // Then updating the uniform buffer.
-        // TODO: make me parallel.
+        # pragma omp parallel for
         for(auto i = 0_u64; i < ud.objects.size(); ++i)
         {
+            if(!ud.objects[i].draw) continue;
+
             const auto object_uniform = context::object_uniforms{ .transform = ud.objects[i].compute_transform() };
             queue.writeBuffer(
                 ctx.object_uniform_buffer,
@@ -343,7 +372,7 @@ int main()
         { // Scope only for IDE collapsing purposes.
             ImGui::BeginMainMenuBar();
             {
-                auto frame_str = fmt::format("Verts: {} Frame {}: {:.1f} FPS -> {:.4f} MS", ud.scene.mesh.index_data.size() / 3, ctx.frame, 1 / dt, dt);
+                auto frame_str = fmt::format("{:.1f} FPS ({:.1f}ms) / {} Tris / {} Ticks / Frame {}", 1 / dt, dt * 1000, ud.scene.mesh.index_data.size() / 3, ticks, ctx.frame);
                 ImGui::SetCursorPosX(ImGui::GetWindowSize().x - ImGui::CalcTextSize(frame_str.c_str()).x -  ImGui::GetStyle().ItemSpacing.x);
                 ImGui::Text("%s", frame_str.c_str());
                 ImGui::SetCursorPosX(0);
@@ -355,13 +384,12 @@ int main()
                     ImGui::PushItemWidth(100);
                     ImGui::InputInt("Height", &ud.nh * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
 
-                    ImGui::MenuItem("Show Adapter info##adapterinfo", nullptr, &ud.adapter_info_menu_open);
+                    ImGui::MenuItem("Show Adapter limits", nullptr, &ud.adapter_info_menu_open);
                     ImGui::EndMenu();
                 }
             }
             ImGui::EndMainMenuBar();
 
-            // TODO: object search with transform manipulation.
             draw_limits_window(ud.adapter_info_menu_open, ctx.limits.adapter, ctx.limits.device);
 
             if( ImGui::Begin("projection") )
@@ -373,6 +401,7 @@ int main()
                 ImGui::SliderFloat3("rot", ud.scene.wt().rot.data(), -3.14, 3.14);
                 ImGui::SliderFloat3("sca", ud.scene.wt().scale.data(), 0, 2);
 
+                // TODO: Implement object search window with transform manipulation and mesh preview.
                 draw_matrix(scene_uniforms.projection, "Projection", "##projection");
                 draw_matrix(scene_uniforms.view, "View", "##view");
                 for(auto const& obj : ud.objects)
@@ -423,21 +452,28 @@ int main()
 
         render_pass.setPipeline(ctx.pipeline);
         render_pass.setBindGroup(0, ctx.scene_bind_group, 0, nullptr);
-        render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, ud.scene.mesh.vertex_data.size() * sizeof(float));
-        render_pass.setVertexBuffer(1, ctx.color_buffer,  0, ud.scene.mesh.color_data.size()  * sizeof(float));
-        render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, ud.scene.mesh.normal_data.size() * sizeof(float));
-        render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, ud.scene.mesh.index_data.size() * sizeof(u16));
+        render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, ud.scene.mesh.vertex_data.size() * sizeof(context::vertex_t));
+        render_pass.setVertexBuffer(1, ctx.color_buffer,  0, ud.scene.mesh.color_data.size()  * sizeof(context::vertex_t));
+        render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, ud.scene.mesh.normal_data.size() * sizeof(context::vertex_t));
+        render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, ud.scene.mesh.index_data.size() * sizeof(context::index_t));
+        fmt::print("rendering {}, points = {}, verts = {}\n", ud.scene.name, ud.scene.mesh.vertex_data.size(), ud.scene.mesh.index_data.size());
 
         auto idx_offset = 0_u32;
         auto vertex_offset = 0_i32;
         auto dynamic_bind_offset = 0_u32;
         for(auto const& obj : ud.objects)
         {
-            render_pass.setBindGroup(1, ctx.object_bind_group, 1, &dynamic_bind_offset);
-            render_pass.drawIndexed(obj.mesh.index_data.size(), 1, idx_offset, vertex_offset, 0);
+            fmt::print("rendering {}/{}, points/offset = {}/{}, verts/offset = {}/{}\n", obj.name, dynamic_bind_offset, obj.mesh.vertex_data.size(), vertex_offset, obj.mesh.index_data.size(), idx_offset);
+            if(obj.draw)
+            {
+                render_pass.setBindGroup(1, ctx.object_bind_group, 1, &dynamic_bind_offset);
+                // TODO: why is the second pyramid drawn wrong ?
+                render_pass.drawIndexed(obj.mesh.index_data.size(), 1, idx_offset, vertex_offset, 0);
+            }
+
             idx_offset          += obj.mesh.index_data.size();
             vertex_offset       += obj.mesh.vertex_data.size();
-            dynamic_bind_offset += ctx.object_uniform_stride; // TODO: fixme.
+            dynamic_bind_offset += ctx.object_uniform_stride;
         }
         ctx.imgui_render(render_pass);
         render_pass.end();

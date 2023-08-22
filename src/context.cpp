@@ -312,7 +312,7 @@ auto context::init_all() -> context&
     std::cout << "[wgpu] Creating vertex buffer..." << std::endl;
     this->desc.vertex_buffer = {
         .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Vertex,
-        .size  = 10000 * sizeof(float),
+        .size  = this->vertex_count * 3 * sizeof(vertex_t),
         .mappedAtCreation = false,
     };
     this->vertex_buffer = device.createBuffer(this->desc.vertex_buffer);
@@ -341,7 +341,7 @@ auto context::init_all() -> context&
         .nextInChain = nullptr,
         .label = "Index buffer",
         .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Index,
-        .size = this->limits.device.limits.maxBufferSize
+        .size = this->index_count * sizeof(index_t)
     };
     this->index_buffer = device.createBuffer(this->desc.index_buffer);
     std::cout << "\t" << this->index_buffer << std::endl;
@@ -362,7 +362,7 @@ auto context::init_all() -> context&
         .nextInChain = nullptr,
         .label = "object uniform buffer",
         .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform,
-        .size = this->object_uniform_stride * 200 /* objlimit = 200 */ + sizeof(object_uniforms),
+        .size = this->object_uniform_stride * (this->object_uniform_limit - 1) + sizeof(object_uniforms),
         .mappedAtCreation = false
     };
     this->object_uniform_buffer = device.createBuffer(this->desc.object_uniform_buffer);
@@ -380,7 +380,7 @@ auto context::init_all() -> context&
         .binding = 0,
         .buffer = this->object_uniform_buffer,
         .offset = 0,
-        .size = this->desc.object_uniform_buffer.size,
+        .size = sizeof(object_uniforms),
     };
 
     //this->desc.sampler = {

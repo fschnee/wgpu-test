@@ -76,6 +76,12 @@ struct context
     standalone::u32 w = 640;
     standalone::u32 h = 480;
 
+    using vertex_t = float;
+    const standalone::u64 vertex_count = 300'000;
+    using index_t = standalone::u16;
+    const standalone::u64 index_count = 100'000;
+    const standalone::u16 object_uniform_limit = 200;
+
     wgpu::Instance instance = {nullptr};
     wgpu::Surface surface = {nullptr};
     wgpu::Adapter adapter = {nullptr};
