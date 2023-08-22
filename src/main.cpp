@@ -48,6 +48,7 @@ int main()
     });
     if(!ok) return 1;
 
+    // TODO: refactor me into file.
     struct object
     {
         using vecf = std::vector<context::vertex_t>;
@@ -139,6 +140,7 @@ int main()
         m4f  mutable cached_transform   = m4f::scaling(1, 1, 1);
     };
 
+    // TODO: refactor me into file.
     struct userdata
     {
         bool adapter_info_menu_open = false;
@@ -146,6 +148,9 @@ int main()
         u32 nw = 1280;
         u32 nh = 640;
 
+        bool fixed_tick_rate = true;
+        u64 total_ticks = 0;
+        u64 fixed_ticks = 0; // Can use as id for lockstep networking or something else.
         float ticks_per_second = 120.0f;
         float leftover_tick_seconds = 0.0f;
 
@@ -198,6 +203,16 @@ int main()
         float total_seconds = 0.0f;
 
         std::vector<object> objects;
+
+        constexpr auto tick(auto dt)
+        {
+            ++ud.total_ticks;
+
+            // TODO: make me parallel by updating against scene snapshots.
+            if(ud.scene.tick) ud.scene.on_tick(dt, ud.scene);
+            for(auto i = 0_u64; i < ud.objects.size(); ++i)
+                if(ud.objects[i].tick) ud.objects[i].on_tick(dt, ud.objects[i]);
+        }
     } ud = userdata{};
 
     ud.geometry_changed = true;
@@ -271,7 +286,6 @@ int main()
         }
     }};
 
-
     p.name = "Pyramid 2";
     p.wt().pos = {0.5f, 0.0f, 0.0f};
     p.wt().scale = {0.3f, 0.3f, 0.3f};
@@ -285,7 +299,6 @@ int main()
     p.on_tick = [](auto dt, auto& self) { self.wt().rot[1] += dt; };
     p.draw = true;
     ud.objects.push_back(p);
-
 
     ctx.loop(&ud, [](auto dt, auto ctx, auto* _ud)
     {
@@ -321,19 +334,27 @@ int main()
         if(ud.nw != ctx.w || ud.nh != ctx.h) { ctx.set_resolution(ud.nw, ud.nh); }
 
         // Doing object ticks (fixed tick rate).
-        const auto tick_ms = 1 / ud.ticks_per_second;
-        ud.leftover_tick_seconds += dt;
         auto ticks = 0_u64; // For debug purposes.
-        while(ud.leftover_tick_seconds >= tick_ms)
+        if(ud.fixed_tick_rate)
         {
-            ++ticks;
-            ud.leftover_tick_seconds -= tick_ms;
-
-            // TODO: make me parallel by updating against scene snapshots.
-            if(ud.scene.tick) ud.scene.on_tick(tick_ms, ud.scene);
-            for(auto i = 0_u64; i < ud.objects.size(); ++i)
-                if(ud.objects[i].tick) ud.objects[i].on_tick(tick_ms, ud.objects[i]);
+            const auto seconds_per_tick = 1.0f / ud.ticks_per_second;
+            ud.leftover_tick_seconds += dt;
+            while(ud.leftover_tick_seconds >= seconds_per_tick)
+            {
+                ud.tick(seconds_per_tick);
+                ++ticks;
+                ++ud.fixed_ticks;
+                ud.leftover_tick_seconds -= seconds_per_tick;
+            }
         }
+        else
+        {
+            ud.tick(dt + ud.leftover_tick_seconds);
+            ud.leftover_tick_seconds = 0.0f;
+            ++ticks;
+        }
+
+        if(!ticks) continue;
 
         // Then updating the uniform buffers.
         const auto scene_uniforms = context::scene_uniforms{
@@ -372,7 +393,18 @@ int main()
         { // Scope only for IDE collapsing purposes.
             ImGui::BeginMainMenuBar();
             {
-                auto frame_str = fmt::format("{:.1f} FPS ({:.1f}ms) / {} Tris / {} Ticks / Frame {}", 1 / dt, dt * 1000, ud.scene.mesh.index_data.size() / 3, ticks, ctx.frame);
+                auto frame_str = ud.fixed_tick_rate ? fmt::format(
+                    "{:.1f} FPS ({:.1f}ms) / {} Tris / {} Ticks - {} TPS ({:.1f}ms) / Frame {}",
+                    1 / dt, dt * 1000,
+                    ud.scene.mesh.index_data.size() / 3,
+                    ticks, ud.ticks_per_second, seconds_per_tick * 1000,
+                    ctx.frame
+                ) : fmt::format(
+                    "{:.1f} FPS ({:.1f}ms) / {} Tris / Frame {}",
+                    1 / dt, dt * 1000,
+                    ud.scene.mesh.index_data.size() / 3,
+                    ctx.frame
+                );
                 ImGui::SetCursorPosX(ImGui::GetWindowSize().x - ImGui::CalcTextSize(frame_str.c_str()).x -  ImGui::GetStyle().ItemSpacing.x);
                 ImGui::Text("%s", frame_str.c_str());
                 ImGui::SetCursorPosX(0);
