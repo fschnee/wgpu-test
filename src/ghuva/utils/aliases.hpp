@@ -1,7 +1,7 @@
 // Who likes long types?
 #pragma once
 
-namespace standalone::inline integer_aliases
+namespace ghuva::inline integer_aliases
 {
     namespace detail
     {

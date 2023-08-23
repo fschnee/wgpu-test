@@ -17,10 +17,10 @@
 #include "zep.hpp"
 
 #include "webgpu.hpp"
-#include "context.hpp"
-#include "m.hpp"
 
-#include "standalone/all.hpp"
+#include "ghuva/utils.hpp"
+#include "ghuva/object.hpp"
+#include "ghuva/context.hpp"
 
 #ifdef __EMSCRIPTEN__
     #define IS_NATIVE false
@@ -33,112 +33,20 @@
 #define DONT_FORGET(fn) STANDALONE_DONT_FORGET(fn)
 
 auto draw_limits_window(bool& open, wgpu::SupportedLimits& adapter,  wgpu::SupportedLimits& device) -> void;
-auto draw_matrix(m4f const&, const char*, const char*) -> void;
+auto draw_matrix(ghuva::m4f const&, const char*, const char*) -> void;
 
 int main()
 {
-    using namespace standalone::integer_aliases;
-    namespace cvt = standalone::cvt;
-    namespace s   = standalone;
+    using namespace ghuva::integer_aliases;
+    namespace cvt = ghuva::cvt;
+    namespace g   = ghuva;
 
     bool ok = true;
-    auto ctx = context::get().init_all([&]([[maybe_unused]] auto& err, [[maybe_unused]] auto& ctx){
+    auto ctx = g::context::get().init_all([&]([[maybe_unused]] auto& err, [[maybe_unused]] auto& ctx){
         ok = false;
         // TODO: catch init errors
     });
     if(!ok) return 1;
-
-    // TODO: refactor me into file.
-    struct object
-    {
-        using vecf = std::vector<context::vertex_t>;
-        using vecidx = std::vector<context::index_t>;
-        using on_tick_t = std::function<void(float dt, object& self)>;
-
-        std::string name = "";
-        bool draw = true;
-        bool tick = true;
-
-        struct mesh_t
-        {
-            vecf   vertex_data = {};
-            vecf   color_data = {};
-            vecf   normal_data = {};
-            vecidx index_data = {};
-        } mesh;
-
-        struct transform
-        {
-            standalone::fpoint pos   = {0, 0, 0};
-            standalone::fpoint rot   = {0, 0, 0}; // In radians.
-            standalone::fpoint scale = {1, 1, 1};
-        };
-
-        struct constructorargs
-        {
-            std::string name = "";
-            mesh_t mesh = {};
-            transform world_transform = {};
-            transform model_transform = {};
-            on_tick_t on_tick = [](auto, auto){};
-            bool draw = true;
-            bool tick = true;
-        };
-
-        object(constructorargs&& args)
-            : name{ s::move(args.name) }
-            , draw{ args.draw }
-            , tick{ args.tick }
-            , mesh{ s::move(args.mesh) }
-            , on_tick{ s::move(args.on_tick) }
-            , world_transform{ s::move(args.world_transform) }
-            , model_transform{ s::move(args.model_transform) }
-        {}
-
-        constexpr auto wt() -> transform& { transform_is_dirty = true; return world_transform; }
-        constexpr auto mt() -> transform& { transform_is_dirty = true; return model_transform; }
-        constexpr auto wt() const -> transform const& { return world_transform; }
-        constexpr auto mt() const -> transform const& { return model_transform; }
-
-        auto look_at(standalone::fpoint const& _target)
-        {
-            [[maybe_unused]] const auto target = _target - this->mt().pos;
-            //TODO: Implementar. Só fazer this->mt().rot apontar target.
-        }
-
-        // This is heavy, please only call this if you *really* need to,
-        // otherwise this is called for every object before rendering.
-        constexpr auto compute_transform() const -> m4f
-        {
-            if(!this->transform_is_dirty) return this->cached_transform;
-            this->transform_is_dirty = false;
-
-            const auto& wt = this->wt();
-            const auto& mt = this->mt();
-
-            return this->cached_transform = m4f
-                ::translation(wt.pos[0], wt.pos[1], wt.pos[2])
-                .zRotate(wt.rot[2])
-                .yRotate(wt.rot[1])
-                .xRotate(wt.rot[0])
-                .scale(wt.scale[0], wt.scale[1], wt.scale[2])
-                .translate(mt.pos[0], mt.pos[1], mt.pos[2])
-                .zRotate(mt.rot[2])
-                .yRotate(mt.rot[1])
-                .xRotate(mt.rot[0])
-                .scale(mt.scale[0], mt.scale[1], mt.scale[2]);
-        };
-
-        on_tick_t on_tick = [](auto, auto){};
-
-    private:
-        transform world_transform = {};
-        transform model_transform = {};
-
-        // For optimization purposes.
-        bool mutable transform_is_dirty = true;
-        m4f  mutable cached_transform   = m4f::scaling(1, 1, 1);
-    };
 
     // TODO: refactor me into file.
     struct userdata
@@ -162,13 +70,13 @@ int main()
         float far  = 100;
         // View transform (camera) stuff + geometry data from
         // all objects that updates every time geometry changes = true.
-        object scene = object{{
+        ghuva::object scene = {{
             .name = "scene",
             .world_transform = { .pos = {0.0, 0.0, 2.0}, .rot = {-3.0f * M_PI / 4.0f, 0.0f, 0.0f} },
             .on_tick = [
                     t = 0.0f,
                     currpoint = 0_u32,
-                    path = std::vector<standalone::fpoint>{
+                    path = std::vector<ghuva::fpoint>{
                         {0.0f, 0.0f, 2.0f},
                         {0.5f, 0.5f, 2.0f},
                         {1.0f, 0.5f, 2.0f},
@@ -191,14 +99,14 @@ int main()
                     const auto p3 = path[(currpoint + 2) % path.size()];
 
                     // From https://javascript.info/bezier-curve.
-                    self.wt().pos = standalone::m::satlerp( self.wt().pos, (1-t)*(1-t)*p1 + 2*(1-t)*t*p2 + t*t*p3, dt);
+                    self.wt().pos = ghuva::m::satlerp( self.wt().pos, (1-t)*(1-t)*p1 + 2*(1-t)*t*p2 + t*t*p3, dt);
                 }
         }};
         bool geometry_changed = false;
 
         float total_seconds = 0.0f;
 
-        std::vector<object> objects;
+        std::vector<ghuva::object> objects;
 
         constexpr auto tick(float dt)
         {
@@ -213,86 +121,34 @@ int main()
 
     ud.geometry_changed = true;
 
-    auto p = object{{
-        .mesh = {
-            .vertex_data = {
-                -0.5, -0.5, -0.3,
-                +0.5, -0.5, -0.3,
-                +0.5, +0.5, -0.3,
-                -0.5, +0.5, -0.3,
-                -0.5, -0.5, -0.3,
-                +0.5, -0.5, -0.3,
-                +0.0, +0.0, +0.5,
-                +0.5, -0.5, -0.3,
-                +0.5, +0.5, -0.3,
-                +0.0, +0.0, +0.5,
-                +0.5, +0.5, -0.3,
-                -0.5, +0.5, -0.3,
-                +0.0, +0.0, +0.5,
-                -0.5, +0.5, -0.3,
-                -0.5, -0.5, -0.3,
-                +0.0, +0.0, +0.5,
-            },
-            .color_data = {
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-                1.0, 1.0, 1.0,
-            },
-            .normal_data = {
-                0.0,   -1.0,   0.0,
-                0.0,   -1.0,   0.0,
-                0.0,   -1.0,   0.0,
-                0.0,   -1.0,   0.0,
-                0.0,   -0.848, 0.53,
-                0.0,   -0.848, 0.53,
-                0.0,   -0.848, 0.53,
-                0.848, 0.0,    0.53,
-                0.848, 0.0,    0.53,
-                0.848, 0.0,    0.53,
-                0.0,   0.848,  0.53,
-                0.0,   0.848,  0.53,
-                0.0,   0.848,  0.53,
-                -0.848, 0.0,    0.53,
-                -0.848, 0.0,    0.53,
-                -0.848, 0.0,    0.53,
-            },
-            .index_data = {
-                // Base
-                0,  1,  2,
-                0,  2,  3,
-                // Sides
-                4,  5,  6,
-                7,  8,  9,
-                10, 11, 12,
-                13, 14, 15,
-            },
-        }
-    }};
+    auto pyramid_mesh = ghuva::object::mesh_t{
+        .vertexes = { -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.0, +0.0, +0.5, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, +0.0, +0.0, +0.5, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, +0.0, +0.0, +0.5, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.0, +0.0, +0.5 },
+        .colors  = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 },
+        .normals = { 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53 },
+        .indexes  = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+    };
 
-    p.name = "Pyramid 2";
-    p.wt().pos = {0.5f, 0.0f, 0.0f};
-    p.wt().scale = {0.3f, 0.3f, 0.3f};
-    p.on_tick = [](auto dt, auto& self) { self.wt().rot[2] += dt; };
-    ud.objects.push_back(p);
+    ud.objects.push_back({{
+        .name = "Pyramid",
+        .mesh = pyramid_mesh,
+        .world_transform = {
+            .pos = {-1.5, 0.0f, -1.0f},
+            .scale = {1.0f, 1.0f, 1.0f},
+        },
+        .on_tick = [](auto dt, auto& self) { self.wt().rot.y += dt; },
+    }});
 
-    p.name = "Pyramid";
-    p.wt().pos = {-1.5, 0.0f, -1.0f};
-    p.wt().scale = {1.0f, 1.0f, 1.0f};
-    p.on_tick = [](auto dt, auto& self) { self.wt().rot[1] += dt; };
-    ud.objects.push_back(p);
+    ud.objects.push_back({{
+        .name = "Pyramid 2",
+        .mesh = pyramid_mesh,
+        .world_transform = {
+            .pos = {0.5f, 0.0f, 0.0f},
+            .scale = {0.3f, 0.3f, 0.3f},
+        },
+        .on_tick = [](auto dt, auto& self) { self.wt().rot.z += dt; },
+    }});
+
+    ud.scene.tick = false;
 
     ctx.loop(&ud, [](auto dt, auto ctx, auto* _ud)
     {
@@ -305,23 +161,23 @@ int main()
         if(ud.geometry_changed)
         {
             // Rebuild the scene geometry.
-            ud.scene.mesh.vertex_data.clear();
-            ud.scene.mesh.color_data.clear();
-            ud.scene.mesh.normal_data.clear();
-            ud.scene.mesh.index_data.clear();
+            ud.scene.mesh.vertexes.clear();
+            ud.scene.mesh.colors.clear();
+            ud.scene.mesh.normals.clear();
+            ud.scene.mesh.indexes.clear();
             for(const auto& obj : ud.objects)
             {
-                ud.scene.mesh.vertex_data.insert(ud.scene.mesh.vertex_data.end(), obj.mesh.vertex_data.begin(), obj.mesh.vertex_data.end());
-                ud.scene.mesh.color_data.insert(ud.scene.mesh.color_data.end(),   obj.mesh.color_data.begin(),  obj.mesh.color_data.end());
-                ud.scene.mesh.normal_data.insert(ud.scene.mesh.normal_data.end(), obj.mesh.normal_data.begin(), obj.mesh.normal_data.end());
-                ud.scene.mesh.index_data.insert(ud.scene.mesh.index_data.end(),   obj.mesh.index_data.begin(),  obj.mesh.index_data.end());
+                ud.scene.mesh.vertexes.insert(ud.scene.mesh.vertexes.end(), obj.mesh.vertexes.begin(), obj.mesh.vertexes.end());
+                ud.scene.mesh.colors.insert(ud.scene.mesh.colors.end(),   obj.mesh.colors.begin(),  obj.mesh.colors.end());
+                ud.scene.mesh.normals.insert(ud.scene.mesh.normals.end(), obj.mesh.normals.begin(), obj.mesh.normals.end());
+                ud.scene.mesh.indexes.insert(ud.scene.mesh.indexes.end(),   obj.mesh.indexes.begin(),  obj.mesh.indexes.end());
             }
 
             // And upload it to the gpu.
-            queue.writeBuffer(ctx.vertex_buffer, 0, ud.scene.mesh.vertex_data.data(), ud.scene.mesh.vertex_data.size() * sizeof(context::vertex_t));
-            queue.writeBuffer(ctx.color_buffer,  0, ud.scene.mesh.color_data.data(),  ud.scene.mesh.color_data.size()  * sizeof(context::vertex_t));
-            queue.writeBuffer(ctx.normal_buffer, 0, ud.scene.mesh.normal_data.data(), ud.scene.mesh.normal_data.size() * sizeof(context::vertex_t));
-            queue.writeBuffer(ctx.index_buffer,  0, ud.scene.mesh.index_data.data(),  ud.scene.mesh.index_data.size()  * sizeof(context::index_t));
+            queue.writeBuffer(ctx.vertex_buffer, 0, ud.scene.mesh.vertexes.data(), ud.scene.mesh.vertexes.size() * sizeof(g::context::vertex_t));
+            queue.writeBuffer(ctx.color_buffer,  0, ud.scene.mesh.colors.data(),  ud.scene.mesh.colors.size()  * sizeof(g::context::vertex_t));
+            queue.writeBuffer(ctx.normal_buffer, 0, ud.scene.mesh.normals.data(), ud.scene.mesh.normals.size() * sizeof(g::context::vertex_t));
+            queue.writeBuffer(ctx.index_buffer,  0, ud.scene.mesh.indexes.data(),  ud.scene.mesh.indexes.size()  * sizeof(g::context::index_t));
             ud.geometry_changed = false;
         }
 
@@ -341,7 +197,7 @@ int main()
                 ud.leftover_tick_seconds -= seconds_per_tick;
             }
 
-            if(!ticks) return context::loop_message::do_continue;
+            if(!ticks) return g::context::loop_message::do_continue;
         }
         else
         {
@@ -350,11 +206,10 @@ int main()
             ++ticks;
         }
 
-
         // Then updating the uniform buffers.
-        const auto scene_uniforms = context::scene_uniforms{
+        const auto scene_uniforms = g::context::scene_uniforms{
             .view       = ud.scene.compute_transform(),
-            .projection = m4f::perspective({
+            .projection = ghuva::m4f::perspective({
                 .focal_len    = ud.focal_len,
                 .aspect_ratio = (ud.nw * cvt::to<float>) / (ud.nh * cvt::to<float>),
                 .near         = ud.near,
@@ -374,7 +229,7 @@ int main()
         {
             if(!ud.objects[i].draw) continue;
 
-            const auto object_uniform = context::object_uniforms{ .transform = ud.objects[i].compute_transform() };
+            const auto object_uniform = g::context::object_uniforms{ .transform = ud.objects[i].compute_transform() };
             queue.writeBuffer(
                 ctx.object_uniform_buffer,
                 i * ctx.object_uniform_stride,
@@ -391,13 +246,13 @@ int main()
                 const auto frame_str = ud.fixed_tick_rate ? fmt::format(
                     "{:.1f} FPS ({:.1f}ms) / {} Tris / {} Ticks - {} TPS ({:.1f}ms) / Frame {}",
                     1 / dt, dt * 1000,
-                    ud.scene.mesh.index_data.size() / 3,
+                    ud.scene.mesh.indexes.size() / 3,
                     ticks, ud.ticks_per_second, 1 / ud.ticks_per_second * 1000,
                     ctx.frame
                 ) : fmt::format(
                     "{:.1f} FPS ({:.1f}ms) / {} Tris / Frame {}",
                     1 / dt, dt * 1000,
-                    ud.scene.mesh.index_data.size() / 3,
+                    ud.scene.mesh.indexes.size() / 3,
                     ctx.frame
                 );
                 ImGui::SetCursorPosX(ImGui::GetWindowSize().x - ImGui::CalcTextSize(frame_str.c_str()).x -  ImGui::GetStyle().ItemSpacing.x);
@@ -440,7 +295,7 @@ int main()
         // Frame rendering stuff.
 
         auto next_texture = ctx.swapchain.getCurrentTextureView();
-        if(!next_texture) return context::loop_message::do_break;
+        if(!next_texture) return g::context::loop_message::do_break;
 
         auto encoder = ctx.device.createCommandEncoder({{ .nextInChain = nullptr, .label = "Command Encoder" }});
 
@@ -485,31 +340,21 @@ int main()
         auto dynamic_bind_offset = 0_u32;
         for(auto const& obj : ud.objects)
         {
-<<<<<<< HEAD
-            fmt::print("rendering {}/{}, points/offset = {}/{}, verts/offset = {}/{}\n", obj.name, dynamic_bind_offset, obj.mesh.vertex_data.size(), base_vertex, obj.mesh.index_data.size(), first_index);
-            if(obj.draw)
-            {
-                render_pass.setBindGroup(1, ctx.object_bind_group, 1, &dynamic_bind_offset);
-                // TODO: why is the second pyramid drawn wrong ?
-                fmt::print("\trender_pass.drawIndexed({}, 1, {}, {}, 0);\n", obj.mesh.index_data.size(), first_index, base_vertex);
-                render_pass.drawIndexed(obj.mesh.index_data.size(), 1, first_index, base_vertex, 0);
-=======
             if(obj.draw)
             {
                 render_pass.setBindGroup(1, ctx.object_bind_group, 1, &dynamic_bind_offset);
                 // TODO: Workaround, we just move the buffers around instead of passing the correct params to drawIndexed.
                 //       I'm still not exactly sure why the following just doesn't work.
-                //           render_pass.drawIndexed(obj.mesh.index_data.size(), 1, first_index, base_vertex, 0);
-                render_pass.setVertexBuffer(0, ctx.vertex_buffer, base_vertex * sizeof(context::vertex_t), obj.mesh.vertex_data.size() * sizeof(context::vertex_t));
-                render_pass.setVertexBuffer(1, ctx.color_buffer,  base_vertex * sizeof(context::vertex_t), obj.mesh.color_data.size()  * sizeof(context::vertex_t));
-                render_pass.setVertexBuffer(2, ctx.normal_buffer, base_vertex * sizeof(context::vertex_t), obj.mesh.normal_data.size() * sizeof(context::vertex_t));
-                render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, first_index * sizeof(context::index_t), obj.mesh.index_data.size() * sizeof(context::index_t));
-                render_pass.drawIndexed(obj.mesh.index_data.size(), 1, 0, 0, 0);
->>>>>>> 8cee4f8 (refactor: added math goodies and fixed tick rate refactor)
+                //           render_pass.drawIndexed(obj.mesh.indexes.size(), 1, first_index, base_vertex, 0);
+                render_pass.setVertexBuffer(0, ctx.vertex_buffer, base_vertex * sizeof(g::context::vertex_t), obj.mesh.vertexes.size() * sizeof(g::context::vertex_t));
+                render_pass.setVertexBuffer(1, ctx.color_buffer,  base_vertex * sizeof(g::context::vertex_t), obj.mesh.colors.size()  * sizeof(g::context::vertex_t));
+                render_pass.setVertexBuffer(2, ctx.normal_buffer, base_vertex * sizeof(g::context::vertex_t), obj.mesh.normals.size() * sizeof(g::context::vertex_t));
+                render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, first_index * sizeof(g::context::index_t), obj.mesh.indexes.size() * sizeof(g::context::index_t));
+                render_pass.drawIndexed(obj.mesh.indexes.size(), 1, 0, 0, 0);
             }
 
-            first_index         += obj.mesh.index_data.size();
-            base_vertex         += obj.mesh.vertex_data.size();
+            first_index         += obj.mesh.indexes.size();
+            base_vertex         += obj.mesh.vertexes.size();
             dynamic_bind_offset += ctx.object_uniform_stride;
         }
         ctx.imgui_render(render_pass);
@@ -525,7 +370,7 @@ int main()
         next_texture.drop();
         ctx.swapchain.present();
 
-        return context::loop_message::do_continue;
+        return g::context::loop_message::do_continue;
     });
 
     return 0;
@@ -543,7 +388,7 @@ auto draw_limits_window(bool& open, wgpu::SupportedLimits& adapter,  wgpu::Suppo
             ImGui::Text(fmt::format(                                         \
                 "{:<41}: {} = {:^20} {:^20}",                                \
                 STRINGIFY(name),                                             \
-                standalone::clean_type_name(decltype(wgpu::Limits::name){}), \
+                ghuva::clean_type_name(decltype(wgpu::Limits::name){}), \
                 adapter.limits.name,                                         \
                 device.limits.name                                           \
             ).c_str());
@@ -597,7 +442,7 @@ auto draw_limits_window(bool& open, wgpu::SupportedLimits& adapter,  wgpu::Suppo
     ImGui::End();
 }
 
-auto draw_matrix(m4f const& m, const char* panelname, const char* tablename) -> void
+auto draw_matrix(ghuva::m4f const& m, const char* panelname, const char* tablename) -> void
 {
     ImGui::BeginGroupPanel(panelname);
     ImGui::BeginTable(tablename, 4, 0, ImVec2(250.0f, 0.0f));

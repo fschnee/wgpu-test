@@ -1,14 +1,14 @@
+// TODO: fix all the damn compilation warnings.
 #include "context.hpp"
 
-#include "standalone/chrono.hpp"
-#include "standalone/cvt.hpp"
+#include "utils/chrono.hpp"
+#include "utils/cvt.hpp"
+#include "utils/m4.hpp"
 
 #include <glfw3webgpu.h>
 
 #include <backends/imgui_impl_wgpu.h>
 #include <backends/imgui_impl_glfw.h>
-
-#include "m.hpp"
 
 #include <stdio.h>
 
@@ -20,13 +20,13 @@
 
 #include <fmt/core.h>
 
-auto context::get() -> context&
+auto ghuva::context::get() -> context&
 {
     static auto ctx = context{};
     return ctx;
 }
 
-context::~context()
+ghuva::context::~context()
 {
     if(window)          glfwDestroyWindow(window);
     if(init_successful) glfwTerminate();
@@ -37,10 +37,10 @@ context::~context()
     }
 }
 
-auto context::init_all() -> context&
+auto ghuva::context::init_all() -> context&
 {
-    namespace cvt = standalone::cvt;
-    using namespace standalone::integer_aliases;
+    namespace cvt = ghuva::cvt;
+    using namespace ghuva::integer_aliases;
 
     std::cout << "[glfw] Initializing glfw... " << std::flush;
     this->init_glfw();
@@ -178,7 +178,7 @@ auto context::init_all() -> context&
         return step * divide_and_ceil;
     };
     this->object_uniform_stride = ceil_to_next_multiple(
-        sizeof(context::object_uniforms),
+        sizeof(ghuva::context::object_uniforms),
         this->limits.device.limits.minUniformBufferOffsetAlignment
     );
 
@@ -351,7 +351,7 @@ auto context::init_all() -> context&
         .nextInChain = nullptr,
         .label = "scene uniform buffer",
         .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform,
-        .size = sizeof(context::scene_uniforms),
+        .size = sizeof(ghuva::context::scene_uniforms),
         .mappedAtCreation = false
     };
     this->scene_uniform_buffer = device.createBuffer(this->desc.scene_uniform_buffer);
@@ -447,7 +447,7 @@ auto context::init_all() -> context&
     return *this;
 }
 
-auto context::imgui_new_frame() -> void
+auto ghuva::context::imgui_new_frame() -> void
 {
     this->frame++;
 
@@ -462,13 +462,13 @@ auto context::imgui_new_frame() -> void
     ImGui::NewFrame();
 }
 
-auto context::imgui_render(WGPURenderPassEncoder pass) -> void
+auto ghuva::context::imgui_render(WGPURenderPassEncoder pass) -> void
 {
     ImGui::Render();
     ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass);
 }
 
-auto context::init_glfw() -> context&
+auto ghuva::context::init_glfw() -> context&
 {
     if (!glfwInit()) return *this;
     this->init_successful = true;
@@ -480,7 +480,7 @@ auto context::init_glfw() -> context&
     return *this;
 }
 
-auto context::init_imgui(WGPUDevice device, WGPUTextureFormat swapchainformat, WGPUTextureFormat depthtextureformat) -> context&
+auto ghuva::context::init_imgui(WGPUDevice device, WGPUTextureFormat swapchainformat, WGPUTextureFormat depthtextureformat) -> context&
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -496,7 +496,7 @@ auto context::init_imgui(WGPUDevice device, WGPUTextureFormat swapchainformat, W
     return *this;
 }
 
-auto context::set_resolution(standalone::u32 nw, standalone::u32 nh) -> context&
+auto ghuva::context::set_resolution(ghuva::u32 nw, ghuva::u32 nh) -> context&
 {
     this->new_resolution = true;
     ImGui_ImplWGPU_InvalidateDeviceObjects();
@@ -531,9 +531,9 @@ auto context::set_resolution(standalone::u32 nw, standalone::u32 nh) -> context&
     return *this;
 }
 
-auto context::loop(void* userdata, loop_callback fn) -> void
+auto ghuva::context::loop(void* userdata, loop_callback fn) -> void
 {
-    auto stopwatch = standalone::chrono::stopwatch{};
+    auto stopwatch = ghuva::chrono::stopwatch{};
 
     #ifndef __EMSCRIPTEN__
         while (!glfwWindowShouldClose(window))

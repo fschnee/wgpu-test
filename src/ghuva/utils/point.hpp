@@ -2,7 +2,7 @@
 
 #include "aliases.hpp"
 
-namespace standalone
+namespace ghuva
 {
     template <typename NumT>
     struct point
@@ -59,16 +59,16 @@ namespace standalone
 // You can use LTO to regain (probably) regain the runtime-speed lost from not using
 // constexpr but then linking takes forever.
 
-extern template struct standalone::point<double>;
-extern template struct standalone::point<float>;
-extern template struct standalone::point<standalone::i32>;
-extern template struct standalone::point<standalone::u32>;
+extern template struct ghuva::point<double>;
+extern template struct ghuva::point<float>;
+extern template struct ghuva::point<ghuva::i32>;
+extern template struct ghuva::point<ghuva::u32>;
 
-extern template auto standalone::operator*<double> (double, const point<double>&)   -> point<double>;
-extern template auto standalone::operator/<double> (double, const point<double>&)   -> point<double>;
-extern template auto standalone::operator*<float>  (float, const point<float>&)     -> point<float>;
-extern template auto standalone::operator/<float>  (float, const point<float>&)     -> point<float>;
-extern template auto standalone::operator*<standalone::i32>(standalone::i32, const point<standalone::i32>&) -> point<standalone::i32>;
-extern template auto standalone::operator/<standalone::i32>(standalone::i32, const point<standalone::i32>&) -> point<standalone::i32>;
-extern template auto standalone::operator*<standalone::u32>(standalone::u32, const point<standalone::u32>&) -> point<standalone::u32>;
-extern template auto standalone::operator/<standalone::u32>(standalone::u32, const point<standalone::u32>&) -> point<standalone::u32>;
+extern template auto ghuva::operator*<double> (double, const point<double>&)   -> point<double>;
+extern template auto ghuva::operator/<double> (double, const point<double>&)   -> point<double>;
+extern template auto ghuva::operator*<float>  (float, const point<float>&)     -> point<float>;
+extern template auto ghuva::operator/<float>  (float, const point<float>&)     -> point<float>;
+extern template auto ghuva::operator*<ghuva::i32>(ghuva::i32, const point<ghuva::i32>&) -> point<ghuva::i32>;
+extern template auto ghuva::operator/<ghuva::i32>(ghuva::i32, const point<ghuva::i32>&) -> point<ghuva::i32>;
+extern template auto ghuva::operator*<ghuva::u32>(ghuva::u32, const point<ghuva::u32>&) -> point<ghuva::u32>;
+extern template auto ghuva::operator/<ghuva::u32>(ghuva::u32, const point<ghuva::u32>&) -> point<ghuva::u32>;

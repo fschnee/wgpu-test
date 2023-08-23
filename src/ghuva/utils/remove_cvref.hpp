@@ -1,6 +1,6 @@
 #pragma once
 
-namespace standalone
+namespace ghuva
 {
     template <typename T> struct remove_ref      { using type = T; };
     template <typename T> struct remove_ref<T&>  { using type = T; };

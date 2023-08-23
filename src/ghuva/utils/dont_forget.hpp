@@ -2,7 +2,7 @@
 
 #include "forward.hpp"
 
-namespace standalone
+namespace ghuva
 {
     template <typename Func>
     struct dont_forget
@@ -40,4 +40,4 @@ namespace standalone
 #define _STANDALONE_DONT_FORGET_CONCAT(x, y) _STANDALONE_DONT_FORGET_CONCAT_IMPL(x, y)
 
 #define STANDALONE_DONT_FORGET( body ) \
-    auto _STANDALONE_DONT_FORGET_CONCAT(STANDALONE_reminder_on_line_, __LINE__) = standalone::dont_forget{ [&]{ body; }}
+    auto _STANDALONE_DONT_FORGET_CONCAT(STANDALONE_reminder_on_line_, __LINE__) = ghuva::dont_forget{ [&]{ body; }}

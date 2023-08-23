@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-namespace standalone::inline chrono
+namespace ghuva::inline chrono
 {
     template<
         typename Timer    = std::chrono::high_resolution_clock,
@@ -47,18 +47,18 @@ namespace standalone::inline chrono
 // Implementations.
 
 template <typename Timer>
-constexpr standalone::chrono::stopwatch<Timer>::stopwatch()
+constexpr ghuva::chrono::stopwatch<Timer>::stopwatch()
     : start{timer::now()}
     , last_segment_start{start}
     , this_segment_start{start}
 {}
 
 template <typename Timer>
-constexpr auto standalone::chrono::stopwatch<Timer>::restart() -> stopwatch&
+constexpr auto ghuva::chrono::stopwatch<Timer>::restart() -> stopwatch&
 { return (*this = stopwatch()); }
 
 template <typename Timer>
-constexpr auto standalone::chrono::stopwatch<Timer>::click() -> stopwatch&
+constexpr auto ghuva::chrono::stopwatch<Timer>::click() -> stopwatch&
 {
     last_segment_start = this_segment_start;
     this_segment_start = timer::now();
@@ -67,15 +67,15 @@ constexpr auto standalone::chrono::stopwatch<Timer>::click() -> stopwatch&
 
 template <typename Timer>
 template <typename Duration>
-constexpr auto standalone::chrono::stopwatch<Timer>::last_segment() const
+constexpr auto ghuva::chrono::stopwatch<Timer>::last_segment() const
 { return std::chrono::duration_cast<Duration>(this_segment_start - last_segment_start).count(); }
 
 template <typename Timer>
 template <typename Duration>
-constexpr auto standalone::chrono::stopwatch<Timer>::since_click() const
+constexpr auto ghuva::chrono::stopwatch<Timer>::since_click() const
 { return std::chrono::duration_cast<Duration>(timer::now() - this_segment_start).count(); }
 
 template <typename Timer>
 template <typename Duration>
-constexpr auto standalone::chrono::stopwatch<Timer>::since_beginning() const
+constexpr auto ghuva::chrono::stopwatch<Timer>::since_beginning() const
 { return std::chrono::duration_cast<Duration>(timer::now() - start).count(); }

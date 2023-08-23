@@ -6,11 +6,12 @@ project(
 )
 
 sources = [
-    'src/standalone/geometry.cpp',
+    'src/ghuva/context.cpp',
+    'src/ghuva/object.cpp',
+    'src/ghuva/utils/point.cpp',
 
     'src/main.cpp',
     'src/webgpu.cpp',
-    'src/context.cpp',
     'src/imgui_widgets/group_panel.cpp',
     'src/zep.cpp'
 ]

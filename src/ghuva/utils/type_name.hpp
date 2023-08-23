@@ -6,7 +6,7 @@
 #include "forward.hpp"
 #include "aliases.hpp"
 
-namespace standalone::inline utils
+namespace ghuva::inline utils
 {
     // from https://stackoverflow.com/questions/81870/is-it-possible-to-print-a-variables-type-in-standard-c/56766138#56766138
     // Thanks!
@@ -24,17 +24,17 @@ namespace standalone::inline utils
         std::string_view name, prefix, suffix;
         #if defined(__clang__)
             name   = __PRETTY_FUNCTION__;
-            prefix = "std::string_view standalone::type_name() [T = ";
+            prefix = "std::string_view ghuva::type_name() [T = ";
             if constexpr (EnableShortInts) { suffix = ", EnableShortInts = true]"; }
             else                           { suffix = ", EnableShortInts = false]"; }
         #elif defined(__GNUC__)
             name   = __PRETTY_FUNCTION__;
-            prefix = "constexpr std::string_view standalone::utils::type_name() [with T = ";
+            prefix = "constexpr std::string_view ghuva::utils::type_name() [with T = ";
             if constexpr (EnableShortInts) { suffix = "; bool EnableShortInts = true; std::string_view = std::basic_string_view<char>]"; }
             else                           { suffix = "; bool EnableShortInts = false; std::string_view = std::basic_string_view<char>]"; }
         #elif defined(_MSC_VER)
             name = __FUNCSIG__;
-            prefix = "class std::basic_string_view<char,struct std::char_traits<char> > __cdecl standalone::utils::type_name<";
+            prefix = "class std::basic_string_view<char,struct std::char_traits<char> > __cdecl ghuva::utils::type_name<";
             if constexpr(EnableShortInts) { suffix = ",true>(void)"; }
             else                          { suffix = ",false>(void)"; }
         #else
