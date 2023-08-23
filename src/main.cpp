@@ -479,17 +479,13 @@ int main()
 
         render_pass.setPipeline(ctx.pipeline);
         render_pass.setBindGroup(0, ctx.scene_bind_group, 0, nullptr);
-        render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, ud.scene.mesh.vertex_data.size() * sizeof(context::vertex_t));
-        render_pass.setVertexBuffer(1, ctx.color_buffer,  0, ud.scene.mesh.color_data.size()  * sizeof(context::vertex_t));
-        render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, ud.scene.mesh.normal_data.size() * sizeof(context::vertex_t));
-        render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, ud.scene.mesh.index_data.size() * sizeof(context::index_t));
-        fmt::print("rendering {}, points = {}, verts = {}\n", ud.scene.name, ud.scene.mesh.vertex_data.size(), ud.scene.mesh.index_data.size());
 
         auto first_index = 0_u32;
         auto base_vertex = 0_i32;
         auto dynamic_bind_offset = 0_u32;
         for(auto const& obj : ud.objects)
         {
+<<<<<<< HEAD
             fmt::print("rendering {}/{}, points/offset = {}/{}, verts/offset = {}/{}\n", obj.name, dynamic_bind_offset, obj.mesh.vertex_data.size(), base_vertex, obj.mesh.index_data.size(), first_index);
             if(obj.draw)
             {
@@ -497,6 +493,19 @@ int main()
                 // TODO: why is the second pyramid drawn wrong ?
                 fmt::print("\trender_pass.drawIndexed({}, 1, {}, {}, 0);\n", obj.mesh.index_data.size(), first_index, base_vertex);
                 render_pass.drawIndexed(obj.mesh.index_data.size(), 1, first_index, base_vertex, 0);
+=======
+            if(obj.draw)
+            {
+                render_pass.setBindGroup(1, ctx.object_bind_group, 1, &dynamic_bind_offset);
+                // TODO: Workaround, we just move the buffers around instead of passing the correct params to drawIndexed.
+                //       I'm still not exactly sure why the following just doesn't work.
+                //           render_pass.drawIndexed(obj.mesh.index_data.size(), 1, first_index, base_vertex, 0);
+                render_pass.setVertexBuffer(0, ctx.vertex_buffer, base_vertex * sizeof(context::vertex_t), obj.mesh.vertex_data.size() * sizeof(context::vertex_t));
+                render_pass.setVertexBuffer(1, ctx.color_buffer,  base_vertex * sizeof(context::vertex_t), obj.mesh.color_data.size()  * sizeof(context::vertex_t));
+                render_pass.setVertexBuffer(2, ctx.normal_buffer, base_vertex * sizeof(context::vertex_t), obj.mesh.normal_data.size() * sizeof(context::vertex_t));
+                render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, first_index * sizeof(context::index_t), obj.mesh.index_data.size() * sizeof(context::index_t));
+                render_pass.drawIndexed(obj.mesh.index_data.size(), 1, 0, 0, 0);
+>>>>>>> 8cee4f8 (refactor: added math goodies and fixed tick rate refactor)
             }
 
             first_index         += obj.mesh.index_data.size();
