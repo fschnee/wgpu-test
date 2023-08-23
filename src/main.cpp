@@ -53,7 +53,6 @@ int main()
     {
         using vecf = std::vector<context::vertex_t>;
         using vecidx = std::vector<context::index_t>;
-        using f3x32 = std::array<float, 3>; // TODO: override me with custom struct with .xyz, .rgb, etc.
         using on_tick_t = std::function<void(float dt, object& self)>;
 
         std::string name = "";
@@ -70,9 +69,9 @@ int main()
 
         struct transform
         {
-            f3x32 pos   = {0, 0, 0};
-            f3x32 rot   = {0, 0, 0}; // In radians.
-            f3x32 scale = {1, 1, 1};
+            standalone::fpoint pos   = {0, 0, 0};
+            standalone::fpoint rot   = {0, 0, 0}; // In radians.
+            standalone::fpoint scale = {1, 1, 1};
         };
 
         struct constructorargs
@@ -86,7 +85,7 @@ int main()
             bool tick = true;
         };
 
-        constexpr object(constructorargs&& args)
+        object(constructorargs&& args)
             : name{ s::move(args.name) }
             , draw{ args.draw }
             , tick{ args.tick }
@@ -101,13 +100,14 @@ int main()
         constexpr auto wt() const -> transform const& { return world_transform; }
         constexpr auto mt() const -> transform const& { return model_transform; }
 
-        constexpr auto look_at(f3x32 const& target)
+        auto look_at(standalone::fpoint const& _target)
         {
-            //TODO: Implementar. Só fazer this->mt().rot apontar target - this->mt().pos
+            [[maybe_unused]] const auto target = _target - this->mt().pos;
+            //TODO: Implementar. Só fazer this->mt().rot apontar target.
         }
 
         // This is heavy, please only call this if you *really* need to,
-        // otherwise this is called for every object at the end of the ticks.
+        // otherwise this is called for every object before rendering.
         constexpr auto compute_transform() const -> m4f
         {
             if(!this->transform_is_dirty) return this->cached_transform;
@@ -148,11 +148,13 @@ int main()
         u32 nw = 1280;
         u32 nh = 640;
 
-        bool fixed_tick_rate = true;
-        u64 total_ticks = 0;
-        u64 fixed_ticks = 0; // Can use as id for lockstep networking or something else.
+        bool fixed_tick_rate = true; // Useful for simulations that require high ticks-per-second for stability
+                                     // such as some racing sims, lockstep networking or deterministic physics.
         float ticks_per_second = 120.0f;
         float leftover_tick_seconds = 0.0f;
+
+        u64 fixed_ticks = 0; // Can use as id for lockstep networking or something else.
+        u64 total_ticks = 0;
 
         // Perspective transform stuff.
         float focal_len = 0.75;
@@ -166,7 +168,7 @@ int main()
             .on_tick = [
                     t = 0.0f,
                     currpoint = 0_u32,
-                    path = std::vector<object::f3x32>{
+                    path = std::vector<standalone::fpoint>{
                         {0.0f, 0.0f, 2.0f},
                         {0.5f, 0.5f, 2.0f},
                         {1.0f, 0.5f, 2.0f},
@@ -188,14 +190,8 @@ int main()
                     const auto p2 = path[(currpoint + 1) % path.size()];
                     const auto p3 = path[(currpoint + 2) % path.size()];
 
-                    // from https://javascript.info/bezier-curve.
-                    const auto x = (1-t)*(1-t)*p1[0] + 2*(1-t)*t*p2[0] + t*t*p3[0];
-                    const auto y = (1-t)*(1-t)*p1[1] + 2*(1-t)*t*p2[1] + t*t*p3[1];
-                    const auto z = (1-t)*(1-t)*p1[2] + 2*(1-t)*t*p2[2] + t*t*p3[2];
-
-                    self.wt().pos[0] = x;
-                    self.wt().pos[1] = y;
-                    self.wt().pos[2] = z;
+                    // From https://javascript.info/bezier-curve.
+                    self.wt().pos = standalone::m::satlerp( self.wt().pos, (1-t)*(1-t)*p1 + 2*(1-t)*t*p2 + t*t*p3, dt);
                 }
         }};
         bool geometry_changed = false;
@@ -204,14 +200,14 @@ int main()
 
         std::vector<object> objects;
 
-        constexpr auto tick(auto dt)
+        constexpr auto tick(float dt)
         {
-            ++ud.total_ticks;
+            ++this->total_ticks;
 
             // TODO: make me parallel by updating against scene snapshots.
-            if(ud.scene.tick) ud.scene.on_tick(dt, ud.scene);
-            for(auto i = 0_u64; i < ud.objects.size(); ++i)
-                if(ud.objects[i].tick) ud.objects[i].on_tick(dt, ud.objects[i]);
+            if(this->scene.tick) this->scene.on_tick(dt, this->scene);
+            for(auto i = 0_u64; i < this->objects.size(); ++i)
+                if(this->objects[i].tick) this->objects[i].on_tick(dt, this->objects[i]);
         }
     } ud = userdata{};
 
@@ -290,14 +286,12 @@ int main()
     p.wt().pos = {0.5f, 0.0f, 0.0f};
     p.wt().scale = {0.3f, 0.3f, 0.3f};
     p.on_tick = [](auto dt, auto& self) { self.wt().rot[2] += dt; };
-    p.draw = false;
     ud.objects.push_back(p);
 
     p.name = "Pyramid";
     p.wt().pos = {-1.5, 0.0f, -1.0f};
     p.wt().scale = {1.0f, 1.0f, 1.0f};
     p.on_tick = [](auto dt, auto& self) { self.wt().rot[1] += dt; };
-    p.draw = true;
     ud.objects.push_back(p);
 
     ctx.loop(&ud, [](auto dt, auto ctx, auto* _ud)
@@ -333,7 +327,7 @@ int main()
 
         if(ud.nw != ctx.w || ud.nh != ctx.h) { ctx.set_resolution(ud.nw, ud.nh); }
 
-        // Doing object ticks (fixed tick rate).
+        // Doing object ticks.
         auto ticks = 0_u64; // For debug purposes.
         if(ud.fixed_tick_rate)
         {
@@ -346,6 +340,8 @@ int main()
                 ++ud.fixed_ticks;
                 ud.leftover_tick_seconds -= seconds_per_tick;
             }
+
+            if(!ticks) return context::loop_message::do_continue;
         }
         else
         {
@@ -354,7 +350,6 @@ int main()
             ++ticks;
         }
 
-        if(!ticks) continue;
 
         // Then updating the uniform buffers.
         const auto scene_uniforms = context::scene_uniforms{
@@ -393,11 +388,11 @@ int main()
         { // Scope only for IDE collapsing purposes.
             ImGui::BeginMainMenuBar();
             {
-                auto frame_str = ud.fixed_tick_rate ? fmt::format(
+                const auto frame_str = ud.fixed_tick_rate ? fmt::format(
                     "{:.1f} FPS ({:.1f}ms) / {} Tris / {} Ticks - {} TPS ({:.1f}ms) / Frame {}",
                     1 / dt, dt * 1000,
                     ud.scene.mesh.index_data.size() / 3,
-                    ticks, ud.ticks_per_second, seconds_per_tick * 1000,
+                    ticks, ud.ticks_per_second, 1 / ud.ticks_per_second * 1000,
                     ctx.frame
                 ) : fmt::format(
                     "{:.1f} FPS ({:.1f}ms) / {} Tris / Frame {}",
@@ -490,21 +485,22 @@ int main()
         render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, ud.scene.mesh.index_data.size() * sizeof(context::index_t));
         fmt::print("rendering {}, points = {}, verts = {}\n", ud.scene.name, ud.scene.mesh.vertex_data.size(), ud.scene.mesh.index_data.size());
 
-        auto idx_offset = 0_u32;
-        auto vertex_offset = 0_i32;
+        auto first_index = 0_u32;
+        auto base_vertex = 0_i32;
         auto dynamic_bind_offset = 0_u32;
         for(auto const& obj : ud.objects)
         {
-            fmt::print("rendering {}/{}, points/offset = {}/{}, verts/offset = {}/{}\n", obj.name, dynamic_bind_offset, obj.mesh.vertex_data.size(), vertex_offset, obj.mesh.index_data.size(), idx_offset);
+            fmt::print("rendering {}/{}, points/offset = {}/{}, verts/offset = {}/{}\n", obj.name, dynamic_bind_offset, obj.mesh.vertex_data.size(), base_vertex, obj.mesh.index_data.size(), first_index);
             if(obj.draw)
             {
                 render_pass.setBindGroup(1, ctx.object_bind_group, 1, &dynamic_bind_offset);
                 // TODO: why is the second pyramid drawn wrong ?
-                render_pass.drawIndexed(obj.mesh.index_data.size(), 1, idx_offset, vertex_offset, 0);
+                fmt::print("\trender_pass.drawIndexed({}, 1, {}, {}, 0);\n", obj.mesh.index_data.size(), first_index, base_vertex);
+                render_pass.drawIndexed(obj.mesh.index_data.size(), 1, first_index, base_vertex, 0);
             }
 
-            idx_offset          += obj.mesh.index_data.size();
-            vertex_offset       += obj.mesh.vertex_data.size();
+            first_index         += obj.mesh.index_data.size();
+            base_vertex         += obj.mesh.vertex_data.size();
             dynamic_bind_offset += ctx.object_uniform_stride;
         }
         ctx.imgui_render(render_pass);

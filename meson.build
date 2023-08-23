@@ -6,6 +6,8 @@ project(
 )
 
 sources = [
+    'src/standalone/geometry.cpp',
+
     'src/main.cpp',
     'src/webgpu.cpp',
     'src/context.cpp',
