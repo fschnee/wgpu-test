@@ -334,6 +334,10 @@ int main()
 
         render_pass.setPipeline(ctx.pipeline);
         render_pass.setBindGroup(0, ctx.scene_bind_group, 0, nullptr);
+        render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, ud.scene.mesh.vertexes.size() * sizeof(g::context::vertex_t));
+        render_pass.setVertexBuffer(1, ctx.color_buffer,  0, ud.scene.mesh.colors.size()   * sizeof(g::context::vertex_t));
+        render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, ud.scene.mesh.normals.size()  * sizeof(g::context::vertex_t));
+        render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, ud.scene.mesh.indexes.size() * sizeof(g::context::index_t));
 
         auto first_index = 0_u32;
         auto base_vertex = 0_i32;
@@ -343,18 +347,11 @@ int main()
             if(obj.draw)
             {
                 render_pass.setBindGroup(1, ctx.object_bind_group, 1, &dynamic_bind_offset);
-                // TODO: Workaround, we just move the buffers around instead of passing the correct params to drawIndexed.
-                //       I'm still not exactly sure why the following just doesn't work.
-                //           render_pass.drawIndexed(obj.mesh.indexes.size(), 1, first_index, base_vertex, 0);
-                render_pass.setVertexBuffer(0, ctx.vertex_buffer, base_vertex * sizeof(g::context::vertex_t), obj.mesh.vertexes.size() * sizeof(g::context::vertex_t));
-                render_pass.setVertexBuffer(1, ctx.color_buffer,  base_vertex * sizeof(g::context::vertex_t), obj.mesh.colors.size()  * sizeof(g::context::vertex_t));
-                render_pass.setVertexBuffer(2, ctx.normal_buffer, base_vertex * sizeof(g::context::vertex_t), obj.mesh.normals.size() * sizeof(g::context::vertex_t));
-                render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, first_index * sizeof(g::context::index_t), obj.mesh.indexes.size() * sizeof(g::context::index_t));
-                render_pass.drawIndexed(obj.mesh.indexes.size(), 1, 0, 0, 0);
+                render_pass.drawIndexed(obj.mesh.indexes.size(), 1, first_index, base_vertex, 0);
             }
 
             first_index         += obj.mesh.indexes.size();
-            base_vertex         += obj.mesh.vertexes.size();
+            base_vertex         += obj.mesh.vertexes.size() / 3; // Divide by 3 since each vertex has x, y, z.
             dynamic_bind_offset += ctx.object_uniform_stride;
         }
         ctx.imgui_render(render_pass);
