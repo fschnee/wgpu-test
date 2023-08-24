@@ -94,7 +94,7 @@ auto ghuva::context::init_all() -> context&
     std::cout << "\t" << this->device << std::endl;
 
     wgpuDeviceSetUncapturedErrorCallback(device, [](WGPUErrorType type, char const * message, void * userdata) {
-        auto& ctx = *(cvt::rc<context*> + userdata);
+        [[maybe_unused]] auto& ctx = *(cvt::rc<context*> + userdata);
         std::cout <<  "Uncaptured device error: type " << (type * cvt::to<u64>) << ": " << message << std::endl;
     }, this);
 
@@ -249,19 +249,19 @@ auto ghuva::context::init_all() -> context&
         .shaderLocation = 2, // @location(2)
     });
     this->desc.vertex_buffer_layouts.push_back({
-        .arrayStride = 3 * sizeof(float), // xyz
+        .arrayStride = 3 * sizeof(context::vertex_t), // xyz
         .stepMode = wgpu::VertexStepMode::Vertex,
         .attributeCount = 1,
         .attributes = &this->desc.vertex_buffer_attributes[0],
     });
     this->desc.vertex_buffer_layouts.push_back({
-        .arrayStride = 3 * sizeof(float), // rgb
+        .arrayStride = 3 * sizeof(context::vertex_t), // rgb
         .stepMode = wgpu::VertexStepMode::Vertex,
         .attributeCount = 1,
         .attributes = &this->desc.vertex_buffer_attributes[1],
     });
     this->desc.vertex_buffer_layouts.push_back({
-        .arrayStride = 3 * sizeof(float), // nx, ny, nz
+        .arrayStride = 3 * sizeof(context::vertex_t), // nx, ny, nz
         .stepMode = wgpu::VertexStepMode::Vertex,
         .attributeCount = 1,
         .attributes = &this->desc.vertex_buffer_attributes[2]
@@ -545,6 +545,59 @@ auto ghuva::context::loop(void* userdata, loop_callback fn) -> void
     #else
         while(true) fn(); // TODO: implement loop.
     #endif
+}
+
+auto ghuva::context::begin_render(wgpu::TextureView render_view) -> wgpu::RenderPassEncoder
+{
+    this->render_view = render_view;
+    this->encoder = this->device.createCommandEncoder({{ .nextInChain = nullptr, .label = "Command Encoder" }});
+    this->color_attachment = wgpu::RenderPassColorAttachment{{
+        .view = render_view,
+        .resolveTarget = nullptr,
+        .loadOp = WGPULoadOp_Clear,
+        .storeOp = WGPUStoreOp_Store,
+        .clearValue = WGPUColor{ 0.05, 0.05, 0.05, 1.0 }
+    }};
+    this->depth_attachment = wgpu::RenderPassDepthStencilAttachment({
+        .view = this->depth_texture_view,
+        // Operation settings comparable to the color attachment
+        .depthLoadOp = wgpu::LoadOp::Clear,
+        .depthStoreOp = wgpu::StoreOp::Store,
+        // The initial value of the depth buffer, meaning "far"
+        .depthClearValue = 1.0f,
+        // we could turn off writing to the depth buffer globally here
+        .depthReadOnly = false,
+        // Stencil setup, mandatory but unused
+        .stencilLoadOp = wgpu::LoadOp::Clear,
+        .stencilStoreOp = wgpu::StoreOp::Store,
+        .stencilClearValue = 0,
+        .stencilReadOnly = true,
+    });
+
+    return encoder.beginRenderPass({{
+        .nextInChain = nullptr,
+        .label = "wgpu-test-render-pass",
+        .colorAttachmentCount = 1,
+        .colorAttachments = &this->color_attachment,
+        .depthStencilAttachment = &this->depth_attachment,
+        .occlusionQuerySet = nullptr,
+        .timestampWriteCount = 0,
+        .timestampWrites = nullptr
+    }});
+}
+
+auto ghuva::context::end_render(wgpu::RenderPassEncoder render_pass) -> void
+{
+    this->imgui_render(render_pass);
+    render_pass.end();
+
+    auto command = this->encoder.finish({{
+        .nextInChain = nullptr,
+        .label = "wgpu-test-command-buffer"
+    }});
+    this->device.getQueue().submit(command);
+
+    this->swapchain.present();
 }
 
 // ImGui Backend stuff below.

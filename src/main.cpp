@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <thread>
 
 #include <omp.h>
 
@@ -297,41 +298,7 @@ int main()
         auto next_texture = ctx.swapchain.getCurrentTextureView();
         if(!next_texture) return g::context::loop_message::do_break;
 
-        auto encoder = ctx.device.createCommandEncoder({{ .nextInChain = nullptr, .label = "Command Encoder" }});
-
-        const auto color_attachment = wgpu::RenderPassColorAttachment{{
-            .view = next_texture,
-            .resolveTarget = nullptr,
-            .loadOp = WGPULoadOp_Clear,
-            .storeOp = WGPUStoreOp_Store,
-            .clearValue = WGPUColor{ 0.05, 0.05, 0.05, 1.0 }
-        }};
-        const auto depth_attachment = wgpu::RenderPassDepthStencilAttachment({
-            .view = ctx.depth_texture_view,
-            // Operation settings comparable to the color attachment
-            .depthLoadOp = wgpu::LoadOp::Clear,
-            .depthStoreOp = wgpu::StoreOp::Store,
-            // The initial value of the depth buffer, meaning "far"
-            .depthClearValue = 1.0f,
-            // we could turn off writing to the depth buffer globally here
-            .depthReadOnly = false,
-            // Stencil setup, mandatory but unused
-            .stencilLoadOp = wgpu::LoadOp::Clear,
-            .stencilStoreOp = wgpu::StoreOp::Store,
-            .stencilClearValue = 0,
-            .stencilReadOnly = true,
-        });
-        auto render_pass = encoder.beginRenderPass({{
-            .nextInChain = nullptr,
-            .label = "wgpu-test-render-pass",
-            .colorAttachmentCount = 1,
-            .colorAttachments = &color_attachment,
-            .depthStencilAttachment = &depth_attachment,
-            .occlusionQuerySet = nullptr,
-            .timestampWriteCount = 0,
-            .timestampWrites = nullptr
-        }});
-
+        auto render_pass = ctx.begin_render(next_texture);
         render_pass.setPipeline(ctx.pipeline);
         render_pass.setBindGroup(0, ctx.scene_bind_group, 0, nullptr);
         render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, ud.scene.mesh.vertexes.size() * sizeof(g::context::vertex_t));
@@ -351,21 +318,11 @@ int main()
             }
 
             first_index         += obj.mesh.indexes.size();
-            base_vertex         += obj.mesh.vertexes.size() / 3; // Divide by 3 since each vertex has x, y, z.
+            base_vertex         += obj.mesh.vertexes.size() / 3; // Divide by 3 since each vertex buffer has 3 coords (x, y, z) or (r, g, b), etc.
             dynamic_bind_offset += ctx.object_uniform_stride;
         }
-        ctx.imgui_render(render_pass);
-        render_pass.end();
-
-        auto command = encoder.finish({{
-            .nextInChain = nullptr,
-            .label = "wgpu-test-command-buffer"
-        }});
-
-        queue.submit(command);
-
+        ctx.end_render(render_pass);
         next_texture.drop();
-        ctx.swapchain.present();
 
         return g::context::loop_message::do_continue;
     });

@@ -104,6 +104,12 @@ namespace ghuva
         wgpu::RenderPipeline pipeline = {nullptr};
         wgpu::ShaderModule shader = {nullptr};
 
+        // begin_render and end_render stuff.
+        wgpu::CommandEncoder encoder = {nullptr};
+        wgpu::RenderPassColorAttachment color_attachment = {};
+        wgpu::RenderPassDepthStencilAttachment depth_attachment = {};
+        wgpu::TextureView render_view = {nullptr};
+
         wgpu::Texture depth_texture = {nullptr};
         wgpu::TextureView depth_texture_view = {nullptr};
 
@@ -127,6 +133,9 @@ namespace ghuva
         {
             alignas(64) ghuva::m4f transform;
         };
+
+        auto begin_render(wgpu::TextureView render_view) -> wgpu::RenderPassEncoder;
+        auto end_render(wgpu::RenderPassEncoder render_pass) -> void;
 
         auto init_instance()
         {
