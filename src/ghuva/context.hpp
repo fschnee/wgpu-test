@@ -79,10 +79,10 @@ namespace ghuva
         ghuva::u32 h = 480;
 
         using vertex_t = float;
-        const ghuva::u64 vertex_count = 300'000;
+        const ghuva::u64 vertex_count = 3'000'000;
         using index_t = ghuva::u16;
-        const ghuva::u64 index_count = 100'000;
-        const ghuva::u16 object_uniform_limit = 200;
+        const ghuva::u64 index_count = 1'000'000;
+        const ghuva::u16 object_uniform_limit = 100'000;
 
         wgpu::Instance instance = {nullptr};
         wgpu::Surface surface = {nullptr};
