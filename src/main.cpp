@@ -22,15 +22,16 @@
 #include "ghuva/objects/eel.hpp"
 #include "ghuva/objects/ew.hpp"
 
+using namespace ghuva::aliases;
+namespace cvt = ghuva::cvt;
+namespace g   = ghuva;
+
+auto load_scene(g::default_engine& engine) -> void;
 auto draw_limits_window(bool& open, wgpu::SupportedLimits& adapter,  wgpu::SupportedLimits& device) -> void;
-auto draw_matrix(ghuva::m4f const&, const char*, const char*) -> void;
+auto draw_matrix(g::m4f const&, const char*, const char*) -> void;
 
 int main()
 {
-    using namespace ghuva::aliases;
-    namespace cvt = ghuva::cvt;
-    namespace g   = ghuva;
-
     bool ok = true;
     auto ctx = g::context::get().init_all([&]([[maybe_unused]] auto& err, [[maybe_unused]] auto& ctx){
         ok = false;
@@ -57,66 +58,7 @@ int main()
         float total_seconds = 0.0f;
     } ud = userdata{};
 
-    using engine_t = decltype(userdata::engine);
-
-    auto const eel_post_id = ud.engine.post(engine_t::register_object{ ghuva::objects::make_eel<engine_t>() });
-    fmt::print("[main] Requested engine to register EEL {{ .event_id = {} }}\n", eel_post_id);
-
-    auto const camera_post_id = ud.engine.post(engine_t::register_object{ .object = {{
-        .name = "Camera",
-        .t = {
-            .pos = {0.0, 0.0, 2.0},
-            .rot = {-3.0f * M_PI / 4.0f, 0.0f, 0.0f},
-        },
-        .on_tick = [](auto& self, auto, auto const& snapshot, auto& engine)
-        {
-            if(snapshot.camera_object_id != self.id)
-                engine.post(engine_t::set_camera{ .object_id = self.id });
-        }
-    }}});
-    fmt::print("[main] Requested engine to register Camera {{ .event_id = {} }}\n", camera_post_id);
-
-    auto const pyramid_mesh_post_id = ud.engine.post(engine_t::register_mesh{ .mesh = {
-        .id = 0,
-        .vertexes = { -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.0, +0.0, +0.5, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, +0.0, +0.0, +0.5, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, +0.0, +0.0, +0.5, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.0, +0.0, +0.5 },
-        .colors  = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 },
-        .normals = { 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53 },
-        .indexes  = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
-    }});
-    fmt::print("[main] Requested engine to register pyramid_mesh {{ .event_id = {} }}\n", pyramid_mesh_post_id);
-
-    // Our pyramid loader will wait for the mesh to be registered to get it's id.
-    auto const ew_post_id = ud.engine.post(engine_t::register_object{ ghuva::objects::make_ew<engine_t>(pyramid_mesh_post_id, [](
-        auto const& _e,
-        [[maybe_unused]] auto dt,
-        [[maybe_unused]] auto const& snapshot,
-        [[maybe_unused]] auto& engine
-    ){
-        // Due to EW checking all event types we need to tell the compiler exactly what kind of event this is.
-        // In this situation we know the event type (posted it just above), but in the middle of game code
-        // it could get get messy and easy to make mistakes. Don't blindly cast like I do here.
-        // TODO: EW for single event type -> add template param.
-        auto const& e = _e * cvt::rc<engine_t::e_register_mesh const&>;
-        auto const mesh_id = e.body.mesh.id;
-        auto const p1eid = engine.post(engine_t::register_object{ .object = {{
-            .name = "Pyramid",
-            .t = { .pos = {-1.5, 0.0f, -1.0f} },
-            .on_tick = [](auto& self, auto dt, auto, auto) { self.t.rot.y += dt; },
-            .mesh_id = mesh_id,
-        }}});
-        fmt::print("[ghuva::engine/t{}][main] Requested engine to register Pyramid {{ .event_id={} }}\n", snapshot.id, p1eid);
-        auto const p2eid = engine.post(engine_t::register_object{ .object = {{
-            .name = "Pyramid 2",
-            .t = {
-                .pos = {0.5f, 0.0f, 0.0f},
-                .scale = {0.3f, 0.3f, 0.3f},
-            },
-            .on_tick = [](auto& self, auto dt, auto, auto) { self.t.rot.z += dt; },
-            .mesh_id = mesh_id,
-        }}});
-        fmt::print("[ghuva::engine/t{}][main] Requested engine to register Pyramid 2 {{ .event_id={} }}\n", snapshot.id, p2eid);
-    })});
-    fmt::print("[main] Requested engine to register EW for {{ .event_id = {} }}\n", ew_post_id);
+    load_scene(ud.engine);
 
     ctx.loop(&ud, [](auto dt, auto ctx, auto* _ud)
     {
@@ -305,6 +247,70 @@ int main()
     return 0;
 }
 
+auto load_scene(g::default_engine& engine) -> void
+{
+    using engine_t = g::remove_cvref_t< decltype(engine) >;
+
+    auto const eel_post_id = engine.post(engine_t::register_object{ g::objects::make_eel<engine_t>() });
+    fmt::print("[main.load_scene] Requested engine to register EEL {{ .event_id = {} }}\n", eel_post_id);
+
+    auto const camera_post_id = engine.post(engine_t::register_object{ .object = {{
+        .name = "Camera",
+        .t = {
+            .pos = {0.0, 0.0, 2.0},
+            .rot = {-3.0f * M_PI / 4.0f, 0.0f, 0.0f},
+        },
+        .on_tick = [](auto& self, auto, auto const& snapshot, auto& engine)
+        {
+            if(snapshot.camera_object_id != self.id)
+                engine.post(engine_t::set_camera{ .object_id = self.id });
+        }
+    }}});
+    fmt::print("[main.load_scene] Requested engine to register Camera {{ .event_id = {} }}\n", camera_post_id);
+
+    auto const pyramid_mesh_post_id = engine.post(engine_t::register_mesh{ .mesh = {
+        .id = 0,
+        .vertexes = { -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.0, +0.0, +0.5, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, +0.0, +0.0, +0.5, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, +0.0, +0.0, +0.5, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.0, +0.0, +0.5 },
+        .colors  = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 },
+        .normals = { 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53 },
+        .indexes  = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+    }});
+    fmt::print("[main.load_scene] Requested engine to register pyramid_mesh {{ .event_id = {} }}\n", pyramid_mesh_post_id);
+
+    // Our pyramid loader will wait for the mesh to be registered to get it's id.
+    auto const ew_post_id = engine.post(engine_t::register_object{ g::objects::make_ew<engine_t>(pyramid_mesh_post_id, [](
+        auto const& _e,
+        [[maybe_unused]] auto dt,
+        [[maybe_unused]] auto const& snapshot,
+        [[maybe_unused]] auto& engine
+    ){
+        // Due to EW checking all event types we need to tell the compiler exactly what kind of event this is.
+        // In this situation we know the event type (posted it just above), but in the middle of game code
+        // it could get get messy and easy to make mistakes. Don't blindly cast like I do here.
+        // TODO: EW for single event type -> add template param.
+        auto const& e = _e * cvt::rc<engine_t::e_register_mesh const&>;
+        auto const mesh_id = e.body.mesh.id;
+        auto const p1eid = engine.post(engine_t::register_object{ .object = {{
+            .name = "Pyramid",
+            .t = { .pos = {-1.5, 0.0f, -1.0f} },
+            .on_tick = [](auto& self, auto dt, auto, auto) { self.t.rot.y += dt; },
+            .mesh_id = mesh_id,
+        }}});
+        fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid {{ .event_id={} }}\n", snapshot.id, p1eid);
+        auto const p2eid = engine.post(engine_t::register_object{ .object = {{
+            .name = "Pyramid 2",
+            .t = {
+                .pos = {0.5f, 0.0f, 0.0f},
+                .scale = {0.3f, 0.3f, 0.3f},
+            },
+            .on_tick = [](auto& self, auto dt, auto, auto) { self.t.rot.z += dt; },
+            .mesh_id = mesh_id,
+        }}});
+        fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid 2 {{ .event_id={} }}\n", snapshot.id, p2eid);
+    })});
+    fmt::print("[main.load_scene] Requested engine to register EW for {{ .event_id = {} }}\n", ew_post_id);
+}
+
 auto draw_limits_window(bool& open, wgpu::SupportedLimits& adapter,  wgpu::SupportedLimits& device) -> void
 {
     if(!open) return;
@@ -317,7 +323,7 @@ auto draw_limits_window(bool& open, wgpu::SupportedLimits& adapter,  wgpu::Suppo
             ImGui::Text(fmt::format(                                         \
                 "{:<41}: {} = {:^20} {:^20}",                                \
                 STRINGIFY(name),                                             \
-                ghuva::clean_type_name(decltype(wgpu::Limits::name){}), \
+                g::clean_type_name(decltype(wgpu::Limits::name){}), \
                 adapter.limits.name,                                         \
                 device.limits.name                                           \
             ).c_str());
@@ -371,7 +377,7 @@ auto draw_limits_window(bool& open, wgpu::SupportedLimits& adapter,  wgpu::Suppo
     ImGui::End();
 }
 
-auto draw_matrix(ghuva::m4f const& m, const char* panelname, const char* tablename) -> void
+auto draw_matrix(g::m4f const& m, const char* panelname, const char* tablename) -> void
 {
     ImGui::BeginGroupPanel(panelname);
     ImGui::BeginTable(tablename, 4, 0, ImVec2(250.0f, 0.0f));
