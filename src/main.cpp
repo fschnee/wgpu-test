@@ -21,6 +21,7 @@
 #include "ghuva/mesh.hpp"
 #include "ghuva/objects/eel.hpp"
 #include "ghuva/objects/ew.hpp"
+#include "ghuva/utils/math.hpp"
 
 using namespace ghuva::aliases;
 namespace cvt = ghuva::cvt;
@@ -51,12 +52,18 @@ int main()
 
         // TODO: move me to camera object ?
         // Perspective transform stuff.
-        float focal_len = 0.75;
-        float near = 0.01;
-        float far  = 100;
+        f32 focal_len = 0.75;
+        f32 near = 0.01;
+        f32 far  = 100;
 
-        float total_seconds = 0.0f;
+        f32 time_multiplier = 1.0f;
+        f32 target_tps = 120.0f;
+        bool fixed_ticks_per_frame = false;
+        f32 max_tps = 10'000.0f;
+
+        f32 total_seconds = 0.0f;
     } ud = userdata{};
+    using engine_t = g::remove_cvref_t< decltype(ud.engine) >;
 
     load_scene(ud.engine);
 
@@ -68,9 +75,9 @@ int main()
         ud.total_seconds += dt;
 
         // TODO: decouple engine and render threads entirely.
-        auto const ticks = ud.engine.tick(dt);
-        // If nothing changed then we don't need to re-render anything.
-        if(ticks == 0) return g::context::loop_message::do_continue;
+        auto const ticks = ud.engine.tick(dt * ud.time_multiplier);
+        // Uncomment to not update if there were no ticks.
+        // if(ticks == 0) return g::context::loop_message::do_continue;
         auto const snapshot = ud.engine.take_snapshot(); // Copy.
 
         if(ud.nw != ctx.w || ud.nh != ctx.h) { ctx.set_resolution(ud.nw, ud.nh); }
@@ -170,12 +177,44 @@ int main()
 
                 if(ImGui::BeginMenu("Menu"))
                 {
-                    ImGui::PushItemWidth(100);
+                    ImGui::PushItemWidth(150);
                     ImGui::InputInt("Width",  &ud.nw * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
-                    ImGui::PushItemWidth(100);
+                    ImGui::PushItemWidth(150);
                     ImGui::InputInt("Height", &ud.nh * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
 
+                    ImGui::NewLine();
                     ImGui::MenuItem("Show Adapter limits", nullptr, &ud.adapter_info_menu_open);
+                    ImGui::NewLine();
+
+                    ImGui::PushItemWidth(150);
+
+                    if(ImGui::Checkbox("Fixed Ticks per Frame", &ud.fixed_ticks_per_frame))
+                    {
+                        if(ud.fixed_ticks_per_frame)
+                        {
+                            ud.engine.post(engine_t::change_tps{
+                                .tps = g::m::clamp(ud.target_tps * 1.0f / ud.time_multiplier, 0.0f, ud.max_tps)
+                            });
+                        }
+                        else
+                        { ud.engine.post(engine_t::change_tps{ .tps = ud.target_tps }); }
+                    }
+                    ImGui::PushItemWidth(100);
+                    if(ImGui::InputFloat("Time multiplier", &ud.time_multiplier, 0.1f, 0.5f))
+                    {
+                        ud.time_multiplier = ud.time_multiplier < 0.0f ? 0.0f : ud.time_multiplier;
+
+                        if(ud.fixed_ticks_per_frame && ud.time_multiplier > 0.0f)
+                            ud.engine.post(engine_t::change_tps{
+                                .tps = g::m::clamp(ud.target_tps * 1.0f / ud.time_multiplier, 0.0f, ud.max_tps)
+                            });
+                    }
+                    ImGui::BeginDisabled(ud.fixed_ticks_per_frame);
+                    ImGui::PushItemWidth(100);
+                    if(ImGui::InputFloat("TPS", &ud.target_tps, 10.0f, 100.0f))
+                        ud.engine.post(engine_t::change_tps{ .tps = g::m::clamp(ud.target_tps, 0.0f, ud.max_tps) });
+                    ImGui::EndDisabled();
+
                     ImGui::EndMenu();
                 }
             }
@@ -183,7 +222,7 @@ int main()
 
             draw_limits_window(ud.adapter_info_menu_open, ctx.limits.adapter, ctx.limits.device);
 
-            if( ImGui::Begin("projection") )
+            if( ImGui::Begin("Projection") )
             {
                 ImGui::SliderFloat("near", &ud.near, 0.01, 10);
                 ImGui::SliderFloat("far", &ud.far, 0, 100);

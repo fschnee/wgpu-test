@@ -1,18 +1,22 @@
 #pragma once
 
-#include <algorithm>
-#include <cmath>
-
 namespace ghuva::math
 {
     template <typename ReturnT = int>
     constexpr auto sign(auto v) { return v >= decltype(v){0} ? ReturnT{1} : ReturnT{-1}; }
 
+    constexpr auto clamp(auto v, auto min, auto max)
+    {
+             if(v < min) return min;
+        else if(v > max) return max;
+        else             return v;
+    }
+
     // Saturating lerp.
     constexpr auto satlerp(auto now, auto target, auto factor)
     {
         using ft = decltype(factor);
-        factor = std::clamp(factor, ft{0}, ft{1});
+        factor = clamp(factor, ft{0}, ft{1});
         return now * (1 - factor) + target * factor;
     }
 
