@@ -68,8 +68,7 @@ int main()
         f32 near = 0.01;
         f32 far  = 100;
 
-        // TODO: Make time_multiplier part of engine.
-        f32 time_multiplier = 1.0f;
+        f32 target_time_multiplier = 1.0f;
         f32 target_tps = 120.0f;
         bool fixed_ticks_per_frame = false;
         f32 max_tps = 10'000.0f;
@@ -202,24 +201,28 @@ int main()
                     {
                         if(ud.fixed_ticks_per_frame)
                         {
-                            ud.engine.post(engine_t::change_tps{
-                                .tps = g::m::clamp(ud.target_tps * 1.0f / ud.time_multiplier, 0.0f, ud.max_tps)
+                            ud.engine.post(engine_t::set_tps{
+                                .tps = g::m::clamp(ud.target_tps * 1.0f / ud.target_time_multiplier, 0.0f, ud.max_tps)
                             });
                         }
                         else
-                        { ud.engine.post(engine_t::change_tps{ .tps = ud.target_tps }); }
+                        { ud.engine.post(engine_t::set_tps{ .tps = ud.target_tps }); }
                     }
                     ImGui::PushItemWidth(100);
-                    if(ImGui::InputFloat("Time multiplier", &ud.time_multiplier, 0.1f, 0.5f))
+                    if(ImGui::InputFloat("Time multiplier", &ud.target_time_multiplier, 0.1f, 0.5f))
                     {
-                        ud.time_multiplier = ud.time_multiplier < 0.0f ? 0.0f : ud.time_multiplier;
+                        // TODO: fixme! If we set time_multiplier to 0 the engine stalls.
+                        ud.target_time_multiplier = ud.target_time_multiplier < 0.0f ? 0.0001f : ud.target_time_multiplier;
+                        ud.engine.post(engine_t::set_time_multiplier{
+                            .time_multiplier = ud.target_time_multiplier
+                        });
 
                         if(ud.fixed_ticks_per_frame)
-                            ud.engine.post(engine_t::change_tps{
+                            ud.engine.post(engine_t::set_tps{
                                 .tps = g::m::clamp(
-                                    ud.time_multiplier <= 0.0f
-                                        ? ud.time_multiplier
-                                        : ud.target_tps * 1.0f / ud.time_multiplier,
+                                    ud.target_time_multiplier == 0.0f
+                                        ? 0.0f
+                                        : ud.target_tps * 1.0f / ud.target_time_multiplier,
                                     0.0f,
                                     ud.max_tps)
                             });
@@ -227,7 +230,7 @@ int main()
                     ImGui::BeginDisabled(ud.fixed_ticks_per_frame);
                     ImGui::PushItemWidth(100);
                     if(ImGui::InputFloat("TPS", &ud.target_tps, 10.0f, 100.0f))
-                        ud.engine.post(engine_t::change_tps{ .tps = g::m::clamp(ud.target_tps, 0.0f, ud.max_tps) });
+                        ud.engine.post(engine_t::set_tps{ .tps = g::m::clamp(ud.target_tps, 0.0f, ud.max_tps) });
                     ImGui::EndDisabled();
 
                     ImGui::EndMenu();

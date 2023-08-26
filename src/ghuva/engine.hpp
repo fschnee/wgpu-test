@@ -126,6 +126,8 @@ namespace ghuva
         f32 leftover_tick_seconds = 0.0f;
         f32 ticks_per_second = 120.0f;
 
+        f32 time_multiplier = 1.0f;
+
         f32 total_dt = 0.0f;
 
         u64 last_mesh_id = 1;
@@ -140,23 +142,26 @@ namespace ghuva
         using object_t = ghuva::object<engine>; // CRTP this bitch.
 
         // Some engine events.
-        struct register_mesh   { ghuva::mesh mesh; /* Id is overriden */ };
-        struct register_object { object_t object; /* Id is overriden. */ };
-        struct delete_object   { u64 id; bool success; };
-        struct change_tps      { f32 tps; };
-        struct set_camera      { u64 object_id; };
-        using  e_register_mesh   = ghuva::event< register_mesh >;
-        using  e_register_object = ghuva::event< register_object >;
-        using  e_delete_object   = ghuva::event< delete_object >;
-        using  e_change_tps      = ghuva::event< change_tps >;
-        using  e_set_camera      = ghuva::event< set_camera >;
+        struct register_mesh       { ghuva::mesh mesh; /* Id is overriden */ };
+        struct register_object     { object_t object; /* Id is overriden. */ };
+        struct delete_object       { u64 id; bool success; };
+        struct set_tps             { f32 tps; };
+        struct set_camera          { u64 object_id; };
+        struct set_time_multiplier { f32 time_multiplier; };
+        using  e_register_mesh       = ghuva::event< register_mesh >;
+        using  e_register_object     = ghuva::event< register_object >;
+        using  e_delete_object       = ghuva::event< delete_object >;
+        using  e_set_tps             = ghuva::event< set_tps >;
+        using  e_set_camera          = ghuva::event< set_camera >;
+        using  e_set_time_multiplier = ghuva::event< set_time_multiplier >;
 
         using default_events = impl::type_list<
             e_register_mesh,
             e_register_object,
             e_delete_object,
-            e_change_tps,
-            e_set_camera
+            e_set_tps,
+            e_set_camera,
+            e_set_time_multiplier
         >;
         using extra_events   = ExtraPostboardEvents;
         using events         = impl::tlist_merge< default_events, extra_events >::type;
@@ -255,10 +260,12 @@ constexpr auto ghuva::engine<T, T2>::take_snapshot() -> snapshot
 template <typename T, typename T2>
 constexpr auto ghuva::engine<T, T2>::tick(f32 real_dt) -> u64
 {
+    f32 dt;
     f32 leftover_tick_seconds;
     {
         std::unique_lock lock(this->partial_snapshot_mutex);
-        this->partial_snapshot.engine_config.leftover_tick_seconds += real_dt;
+        dt = real_dt * this->partial_snapshot.engine_config.time_multiplier;
+        this->partial_snapshot.engine_config.leftover_tick_seconds += dt;
         leftover_tick_seconds = this->partial_snapshot.engine_config.leftover_tick_seconds;
     }
 
@@ -325,10 +332,12 @@ constexpr auto ghuva::engine<T, T2>::fixed_tick(f32 dt) -> void
             auto& m = e.body.mesh;
             m.id = this->partial_snapshot.engine_config.last_mesh_id++;
             meshes.push_back(m);
-        }).template on_post<e_change_tps>([&](auto& e){
+        }).template on_post<e_set_tps>([&](auto& e){
             this->partial_snapshot.engine_config.ticks_per_second = e.body.tps;
         }).template on_post<e_set_camera>([&](auto& e){
             this->partial_snapshot.camera_object_id = e.body.object_id;
+        }).template on_post<e_set_time_multiplier>([&](auto& e){
+            this->partial_snapshot.engine_config.time_multiplier = e.body.time_multiplier;
         });
 
         // TODO: order messages by receiver_object_id before ticking for easier message vector management.
@@ -343,7 +352,6 @@ constexpr auto ghuva::engine<T, T2>::fixed_tick(f32 dt) -> void
     this->partial_snapshot = snapshot{};
     this->partial_snapshot.engine_config = this->last_snapshot.engine_config;
 
-    // TODO: run me in parallel (requires engine methods like post() and message() to be thread-safe first).
     {
         std::shared_lock lock(this->last_snapshot_mutex);
         #pragma omp parallel for
