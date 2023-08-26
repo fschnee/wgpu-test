@@ -13,8 +13,9 @@ namespace ghuva
 
         constexpr auto data() -> NumT* { return &x; }
 
-        constexpr auto operator[](const auto i)       -> NumT& { return i == 0 ? x : (i == 1 ? y : z); }
-        constexpr auto operator[](const auto i) const -> NumT  { return i == 0 ? x : (i == 1 ? y : z); }
+        // Goes without saying, but caller must check for out of bounds access.
+        constexpr auto operator[](const auto i)       -> NumT& { return *(data() + i); }
+        constexpr auto operator[](const auto i) const -> NumT  { return *(data() + i); }
 
         [[nodiscard]] auto operator+(const point& other) const -> point;
         [[nodiscard]] auto operator-(const point& other) const -> point;

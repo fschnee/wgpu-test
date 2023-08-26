@@ -43,6 +43,10 @@ namespace ghuva
         struct perspectiveparams{ T focal_len, aspect_ratio, near, far; };
         static constexpr auto perspective(perspectiveparams const&) -> m4;
 
+        // Point type needs to have .x, .y and .z.
+        template <typename Point>
+        static constexpr auto from_parts(Point&& pos, Point&& rot, Point&& scale) -> m4;
+
         // Members.
         T raw[4][4] = {0};
     };
@@ -251,4 +255,14 @@ namespace ghuva
         return ret;
     }
 
+    template <typename T>
+    template <typename Point>
+    constexpr auto m4<T>::from_parts(Point&& pos, Point&& rot, Point&& scale) -> m4
+    {
+        return m4::translation(pos.x, pos.y, pos.z)
+            .zRotate(rot.z)
+            .yRotate(rot.y)
+            .xRotate(rot.x)
+            .scale(scale.x, scale.y, scale.x);
+    }
 }

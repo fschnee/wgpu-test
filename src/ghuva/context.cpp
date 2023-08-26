@@ -1,4 +1,5 @@
 // TODO: fix all the damn compilation warnings.
+// TODO: make work in wasm.
 #include "context.hpp"
 
 #include "utils/chrono.hpp"
@@ -39,8 +40,8 @@ ghuva::context::~context()
 
 auto ghuva::context::init_all() -> context&
 {
+    using namespace ghuva::aliases;
     namespace cvt = ghuva::cvt;
-    using namespace ghuva::integer_aliases;
 
     std::cout << "[glfw] Initializing glfw... " << std::flush;
     this->init_glfw();

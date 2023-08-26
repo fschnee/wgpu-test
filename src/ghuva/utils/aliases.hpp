@@ -1,7 +1,7 @@
 // Who likes long types?
 #pragma once
 
-namespace ghuva::inline integer_aliases
+namespace ghuva::inline aliases
 {
     namespace detail
     {
@@ -55,4 +55,8 @@ namespace ghuva::inline integer_aliases
         constexpr auto operator""_i32(unsigned long long val) { return static_cast<i32>(val); }
         constexpr auto operator""_i64(unsigned long long val) { return static_cast<i64>(val); }
     };
+
+    using f32 = float;
+    using f64 = double;
+    static_assert(sizeof(f32) == 32/8 && sizeof(f64) == 64/8);
 }

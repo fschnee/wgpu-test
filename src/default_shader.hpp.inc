@@ -38,14 +38,16 @@ fn vert(in: VertIn) -> FragIn
     var out: FragIn;
     out.position = s.projection * s.view * o.transform * vec4f(in.position, 1.0);
     out.color    = in.color;
-    out.normal   = normalize(o.transform * vec4f(in.normal, 0.0)).xyz; // Make lighting direction-dependent.
+    out.normal   = (o.transform * vec4f(in.normal, 0.0)).xyz; // Make lighting direction-dependent.
     return out;
 }
 
 @fragment
 fn frag(in: FragIn) -> @location(0) vec4f
 {
-    let shading      = dot(normalize(s.light_direction), in.normal) * s.light_color;
+    let normal       = normalize(in.normal); // If we normalize in the vertex shader
+                                             // it gets interpolated between fragments.
+    let shading      = dot(normalize(s.light_direction), normal) * s.light_color;
     let color        = in.color * shading;
     let linear_color = pow(color, vec3f(s.gamma));
     return vec4f(linear_color, 1.0);

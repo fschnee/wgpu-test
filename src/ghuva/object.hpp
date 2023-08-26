@@ -2,7 +2,6 @@
 
 #include <functional>
 #include <string>
-#include <vector>
 
 #include "utils/point.hpp"
 #include "utils/m4.hpp"
@@ -10,94 +9,69 @@
 
 namespace ghuva
 {
+    template< typename Engine >
     struct object
     {
-        using vecf = std::vector<context::vertex_t>;
-        using vecidx = std::vector<context::index_t>;
-        using on_tick_t = std::function<void(float tick_dt, object& self)>;
+        using engine_t   = Engine;
+        using snapshot_t = typename engine_t::snapshot;
+
+        using on_tick_t = std::function<void(
+            object& self,
+            float dt,
+            snapshot_t const& snapshot,
+            engine_t& engine
+        )>;
+
+        u64 id = 0; // Assigned by the engine. 0 = invalid.
 
         std::string name = "";
+        u64 mesh_id = 0; // Registered by the engine. 0 = invalid.
         bool draw = true;
         bool tick = true;
-
-        struct mesh_t
-        {
-            vecf   vertexes = {};
-            vecf   colors   = {};
-            vecf   normals  = {};
-            vecidx indexes  = {};
-        } mesh;
 
         struct transform
         {
             fpoint pos   = {0, 0, 0};
             fpoint rot   = {0, 0, 0}; // In radians.
             fpoint scale = {1, 1, 1};
-        };
+        } t;
 
         struct constructorargs
         {
             std::string name = "";
-            mesh_t mesh = {};
-            transform world_transform = {};
-            transform model_transform = {};
-            on_tick_t on_tick = [](auto, auto){};
+            transform t = {};
+            on_tick_t on_tick = [](auto, auto, auto, auto){};
+            u64 mesh_id = 0;
             bool draw = true;
             bool tick = true;
         };
 
         object(constructorargs&&);
 
-        // wt = world_transform;
-        // mt = model_transform;
-        constexpr auto wt() -> transform&;
-        constexpr auto mt() -> transform&;
-        constexpr auto wt() const -> transform const&;
-        constexpr auto mt() const -> transform const&;
-
         auto look_at(fpoint const& target) -> object&;
 
-        // This is heavy, please only call this if you *really* need to,
-        // otherwise this is called for every object before rendering.
-        constexpr auto compute_transform() const -> ghuva::m4f;
-
-        on_tick_t on_tick = [](auto, auto){};
-
-    private:
-        transform world_transform = {};
-        transform model_transform = {};
-
-        // For optimization purposes.
-        bool mutable transform_is_dirty = true;
-        m4f  mutable cached_transform   = ghuva::m4f::scaling(1, 1, 1);
+        on_tick_t on_tick = [](auto, auto, auto, auto){};
     };
-
 }
 
 // Impls.
 
-constexpr auto ghuva::object::wt() -> transform& { transform_is_dirty = true; return world_transform; }
-constexpr auto ghuva::object::mt() -> transform& { transform_is_dirty = true; return model_transform; }
-constexpr auto ghuva::object::wt() const -> transform const& { return world_transform; }
-constexpr auto ghuva::object::mt() const -> transform const& { return model_transform; }
+template <typename E>
+ghuva::object<E>::object(constructorargs&& args)
+    : name{ ghuva::move(args.name) }
+    , mesh_id{ args.mesh_id }
+    , draw{ args.draw }
+    , tick{ args.tick }
+    , t{ ghuva::move(args.t) }
+    , on_tick{ ghuva::move(args.on_tick) }
+{}
 
-constexpr auto ghuva::object::compute_transform() const -> m4f
+template <typename E>
+auto ghuva::object<E>::look_at(fpoint const& _target) -> object&
 {
-    if(!this->transform_is_dirty) return this->cached_transform;
-    this->transform_is_dirty = false;
+    //[[maybe_unused]] const auto target = _target - this->mt().pos;
+    //TODO: Implementar. Só fazer this->mt().rot apontar target.
 
-    const auto& wt = this->wt();
-    const auto& mt = this->mt();
+    return *this;
+}
 
-    return this->cached_transform = ghuva::m4f
-        ::translation(wt.pos[0], wt.pos[1], wt.pos[2])
-        .zRotate(wt.rot[2])
-        .yRotate(wt.rot[1])
-        .xRotate(wt.rot[0])
-        .scale(wt.scale[0], wt.scale[1], wt.scale[2])
-        .translate(mt.pos[0], mt.pos[1], mt.pos[2])
-        .zRotate(mt.rot[2])
-        .yRotate(mt.rot[1])
-        .xRotate(mt.rot[0])
-        .scale(mt.scale[0], mt.scale[1], mt.scale[2]);
-};
