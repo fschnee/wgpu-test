@@ -5,10 +5,14 @@
 #include "object.hpp"
 #include "mesh.hpp"
 
+#include <shared_mutex>
 #include <vector>
+#include <mutex>
 #include <tuple>
 
 #include <fmt/core.h>
+
+#include <omp.h>
 
 // Utils for managing this type-mess.
 namespace ghuva::impl
@@ -173,7 +177,6 @@ namespace ghuva
             //         fmt::print("Found event");
             //     })
             // You can also chain them for less typing.
-            template <typename E, typename F> constexpr auto on_post(F&& f)       -> snapshot&;
             template <typename E, typename F> constexpr auto on_post(F&& f) const -> snapshot const&;
 
             // Calls f with each std::vector<event> in the postboard.
@@ -194,6 +197,9 @@ namespace ghuva
             // Messages are private, no looksies.
             messageboard_t messageboard;
 
+            // Also, this is only to be used by the engine.
+            template <typename E, typename F> constexpr auto on_post(F&& f) -> snapshot&;
+
             // Except for you, you're ok.
             // Needs access to reorder the messageboard by target_object_id.
             // This way, the messages for each object and message type are contiguous
@@ -201,8 +207,7 @@ namespace ghuva
             friend class engine;
         };
 
-        // TODO: make all of these thread-safe.
-        constexpr auto take_snapshot() -> snapshot { return last_snapshot; }
+        constexpr auto take_snapshot() -> snapshot;
         constexpr auto tick(f32 real_dt) -> u64;
 
         // Posts events to the next snapshot's postboard. Returns the event id.
@@ -218,7 +223,9 @@ namespace ghuva
 
     private:
         // TODO: snapshot keepalive system ?
+        mutable std::shared_mutex last_snapshot_mutex;
         snapshot last_snapshot;
+        mutable std::shared_mutex partial_snapshot_mutex;
         snapshot partial_snapshot; // Postboard of this one and
                                    // other stuff are filled in
                                    // as we tick the current snapshot.
@@ -231,19 +238,47 @@ namespace ghuva
 
 // Impls.
 
-// TODO: config na verdade deveria apontar para partial_snapshot.config.
+template <typename T, typename T2>
+constexpr auto ghuva::engine<T, T2>::take_snapshot() -> snapshot
+{
+    snapshot temp;
+
+    {
+        std::shared_lock lock(this->last_snapshot_mutex);
+        temp = this->last_snapshot;
+    }
+
+    return temp;
+}
+
+// TODO: make thread-safe.
 template <typename T, typename T2>
 constexpr auto ghuva::engine<T, T2>::tick(f32 real_dt) -> u64
 {
-    this->partial_snapshot.engine_config.leftover_tick_seconds += real_dt;
+    f32 leftover_tick_seconds;
+    {
+        std::unique_lock lock(this->partial_snapshot_mutex);
+        this->partial_snapshot.engine_config.leftover_tick_seconds += real_dt;
+        leftover_tick_seconds = this->partial_snapshot.engine_config.leftover_tick_seconds;
+    }
 
     const auto start_tick = this->last_snapshot.id;
 
-    while(this->partial_snapshot.engine_config.leftover_tick_seconds >= 1.0f / this->last_snapshot.engine_config.ticks_per_second)
+    while(true)
     {
-        const auto seconds_per_tick = 1.0f / this->last_snapshot.engine_config.ticks_per_second;
+        f32 seconds_per_tick;
+        {
+            std::shared_lock lock(this->last_snapshot_mutex);
+            seconds_per_tick = 1.0f / this->last_snapshot.engine_config.ticks_per_second;
+        }
+        if(leftover_tick_seconds < seconds_per_tick) break;
+
         this->fixed_tick(seconds_per_tick);
-        this->partial_snapshot.engine_config.leftover_tick_seconds -= seconds_per_tick;
+        {
+            std::unique_lock lock(this->partial_snapshot_mutex);
+            this->partial_snapshot.engine_config.leftover_tick_seconds -= seconds_per_tick;
+        }
+        leftover_tick_seconds -= seconds_per_tick;
     }
 
     return this->last_snapshot.id - start_tick;
@@ -252,46 +287,68 @@ constexpr auto ghuva::engine<T, T2>::tick(f32 real_dt) -> u64
 template <typename T, typename T2>
 constexpr auto ghuva::engine<T, T2>::fixed_tick(f32 dt) -> void
 {
-    this->partial_snapshot.engine_config.total_dt += dt;
-    this->partial_snapshot.id               = this->last_snapshot.id + 1;
-    this->partial_snapshot.objects          = this->last_snapshot.objects;
-    this->partial_snapshot.camera_object_id = this->last_snapshot.camera_object_id;
+    u64                   last_snapshot_id;
+    std::vector<object_t> last_snapshot_objects;
+    u64                   last_snapshot_camera_object_id;
+    f32                   last_snapshot_total_dt;
+    {
+        std::shared_lock lock(this->last_snapshot_mutex);
+        last_snapshot_id               = this->last_snapshot.id;
+        last_snapshot_objects          = this->last_snapshot.objects;
+        last_snapshot_camera_object_id = this->last_snapshot.camera_object_id;
+        last_snapshot_total_dt         = this->last_snapshot.engine_config.total_dt;
+    }
 
-    // Run the engine event handlers.
-    this->partial_snapshot.template on_post<e_delete_object>([&](auto& e){
-        auto& objs = this->partial_snapshot.objects;
-        auto  pos  = std::find_if(objs.begin(), objs.end(), [&](auto obj){ return obj.id == e.body.id; });
+    {
+        std::unique_lock lock(this->partial_snapshot_mutex);
+        this->partial_snapshot.engine_config.total_dt = last_snapshot_total_dt + dt;
+        this->partial_snapshot.id                     = last_snapshot_id + 1;
+        this->partial_snapshot.objects                = ghuva::move(last_snapshot_objects);
+        this->partial_snapshot.camera_object_id       = last_snapshot_camera_object_id;
 
-        if(pos != objs.end())
-        {
-            e.body.success = true;
-            objs.erase(pos); // TODO: replace object vector with something else so can delete without relocating everything.
-        }
-        else { e.body.success = false; }
-    }).template on_post<e_register_object>([&](auto& e){
-        auto& o = e.body.object;
-        o.id = this->partial_snapshot.engine_config.last_object_id++;
-        this->partial_snapshot.objects.push_back(o);
-    }).template on_post<e_register_mesh>([&](auto& e){
-        auto& m = e.body.mesh;
-        m.id = this->partial_snapshot.engine_config.last_mesh_id++;
-        meshes.push_back(m);
-    }).template on_post<e_change_tps>([&](auto& e){
-        this->partial_snapshot.engine_config.ticks_per_second = e.body.tps;
-    }).template on_post<e_set_camera>([&](auto& e){
-        this->partial_snapshot.camera_object_id = e.body.object_id;
-    });
+        // Run the engine event handlers.
+        this->partial_snapshot.template on_post<e_delete_object>([&](auto& e){
+            auto& objs = this->partial_snapshot.objects;
+            auto  pos  = std::find_if(objs.begin(), objs.end(), [&](auto obj){ return obj.id == e.body.id; });
 
-    // TODO: order messages by receiver_object_id before ticking for easier message vector management.
-    //this->partial_snapshot.messageboard;
+            if(pos != objs.end())
+            {
+                e.body.success = true;
+                objs.erase(pos); // TODO: replace object vector with something else so can delete without relocating everything.
+            }
+            else { e.body.success = false; }
+        }).template on_post<e_register_object>([&](auto& e){
+            auto& o = e.body.object;
+            o.id = this->partial_snapshot.engine_config.last_object_id++;
+            this->partial_snapshot.objects.push_back(o);
+        }).template on_post<e_register_mesh>([&](auto& e){
+            auto& m = e.body.mesh;
+            m.id = this->partial_snapshot.engine_config.last_mesh_id++;
+            meshes.push_back(m);
+        }).template on_post<e_change_tps>([&](auto& e){
+            this->partial_snapshot.engine_config.ticks_per_second = e.body.tps;
+        }).template on_post<e_set_camera>([&](auto& e){
+            this->partial_snapshot.camera_object_id = e.body.object_id;
+        });
+
+        // TODO: order messages by receiver_object_id before ticking for easier message vector management.
+        //this->partial_snapshot.messageboard;
+    }
 
     // Then set this snapshot in stone and do the tick proper.
-    this->last_snapshot    = ghuva::move(this->partial_snapshot);
+    {
+        std::unique_lock lock(this->last_snapshot_mutex);
+        this->last_snapshot = ghuva::move(this->partial_snapshot);
+    }
     this->partial_snapshot = snapshot{};
     this->partial_snapshot.engine_config = this->last_snapshot.engine_config;
 
     // TODO: run me in parallel (requires engine methods like post() and message() to be thread-safe first).
-    for(auto& obj : this->last_snapshot.objects) if(obj.tick) obj.on_tick(obj, dt, this->last_snapshot, *this);
+    {
+        std::shared_lock lock(this->last_snapshot_mutex);
+        #pragma omp parallel for
+        for(auto& obj : this->last_snapshot.objects) if(obj.tick) obj.on_tick(obj, dt, this->last_snapshot, *this);
+    }
 }
 
 template <typename T, typename T2>
@@ -302,6 +359,7 @@ constexpr auto ghuva::engine<T, T2>::post(E&& event, u64 source_id) -> u64
 
     if constexpr(engine::postboard_t::template supports<Event>)
     {
+        std::unique_lock lock(this->partial_snapshot_mutex);
         this->partial_snapshot.postboard.template get< Event >().push_back({
             .id = this->partial_snapshot.engine_config.last_event_id++,
             .source_object_id = source_id,
@@ -321,6 +379,7 @@ constexpr auto ghuva::engine<T, T2>::message(M&& message, u64 target_id, u64 sou
 
     if constexpr(engine::messageboard_t::template supports<Message>)
     {
+        std::unique_lock lock(this->partial_snapshot_mutex);
         this->partial_snapshot.messageboard.template get< Message >().push_back({
             .id = this->partial_snapshot.engine_config.last_message_id++,
             .target_object_id = target_id,
@@ -333,6 +392,7 @@ constexpr auto ghuva::engine<T, T2>::message(M&& message, u64 target_id, u64 sou
     else { return 0; }
 }
 
+// This is thread-safe as long as it's always called only by fixed_tick.
 template <typename T, typename T2>
 template <typename E, typename F>
 constexpr auto ghuva::engine<T, T2>::snapshot::on_post(F&& f) -> snapshot&

@@ -102,11 +102,9 @@ namespace ghuva::objects
     template <typename Engine>
     constexpr auto make_eel() -> object<Engine>
     {
-        return {{
+        return {typename object<Engine>::constructorargs{
             .name = "EEL",
-            .on_tick = [](auto se, auto dt, auto sn, auto en){
-                eel_impl::on_tick(se, dt, sn, en);
-            },
+
             .draw = false,
         }};
     }

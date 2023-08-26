@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include <thread>
+#include <atomic>
 #include <omp.h>
 
 // Unused for now.
@@ -48,7 +50,17 @@ int main()
         u32 nw = 1280;
         u32 nh = 640;
 
-        g::default_engine engine;
+        g::default_engine engine = g::default_engine{};
+        std::atomic_bool exit = false; // Flag to exit the engine_thread.
+        std::jthread engine_thread = std::jthread{
+            [this, stopwatch = ghuva::chrono::stopwatch{}]() mutable
+            {
+                while(!this->exit)
+                    this->engine.tick(stopwatch.click().last_segment());
+            }
+        };
+
+        u64 last_snapshot_tick = 0;
 
         // TODO: move me to camera object ?
         // Perspective transform stuff.
@@ -56,12 +68,11 @@ int main()
         f32 near = 0.01;
         f32 far  = 100;
 
+        // TODO: Make time_multiplier part of engine.
         f32 time_multiplier = 1.0f;
         f32 target_tps = 120.0f;
         bool fixed_ticks_per_frame = false;
         f32 max_tps = 10'000.0f;
-
-        f32 total_seconds = 0.0f;
     } ud = userdata{};
     using engine_t = g::remove_cvref_t< decltype(ud.engine) >;
 
@@ -72,13 +83,12 @@ int main()
         auto& ud     = *(_ud * cvt::rc<userdata*>);
         auto  queue  = ctx.device.getQueue();
 
-        ud.total_seconds += dt;
-
         // TODO: decouple engine and render threads entirely.
-        auto const ticks = ud.engine.tick(dt * ud.time_multiplier);
+        auto const snapshot = ud.engine.take_snapshot(); // Copy.
+        auto const ticks = snapshot.id - ud.last_snapshot_tick;
+        ud.last_snapshot_tick = snapshot.id;
         // Uncomment to not update if there were no ticks.
         // if(ticks == 0) return g::context::loop_message::do_continue;
-        auto const snapshot = ud.engine.take_snapshot(); // Copy.
 
         if(ud.nw != ctx.w || ud.nh != ctx.h) { ctx.set_resolution(ud.nw, ud.nh); }
 
@@ -101,7 +111,7 @@ int main()
             .light_direction = {0.2f, 0.4f, 0.3f},
             .light_color     = {1.0f, 0.9f, 0.6f},
 
-            .time  = ud.total_seconds,
+            .time  = snapshot.engine_config.total_dt,
             .gamma = 2.2,
         };
         queue.writeBuffer(ctx.scene_uniform_buffer, 0, &scene_uniforms, sizeof(scene_uniforms));
@@ -204,9 +214,14 @@ int main()
                     {
                         ud.time_multiplier = ud.time_multiplier < 0.0f ? 0.0f : ud.time_multiplier;
 
-                        if(ud.fixed_ticks_per_frame && ud.time_multiplier > 0.0f)
+                        if(ud.fixed_ticks_per_frame)
                             ud.engine.post(engine_t::change_tps{
-                                .tps = g::m::clamp(ud.target_tps * 1.0f / ud.time_multiplier, 0.0f, ud.max_tps)
+                                .tps = g::m::clamp(
+                                    ud.time_multiplier <= 0.0f
+                                        ? ud.time_multiplier
+                                        : ud.target_tps * 1.0f / ud.time_multiplier,
+                                    0.0f,
+                                    ud.max_tps)
                             });
                     }
                     ImGui::BeginDisabled(ud.fixed_ticks_per_frame);
@@ -283,6 +298,8 @@ int main()
         return g::context::loop_message::do_continue;
     });
 
+    ud.exit = true; // So the engine thread also stops.
+
     return 0;
 }
 
@@ -318,10 +335,7 @@ auto load_scene(g::default_engine& engine) -> void
 
     // Our pyramid loader will wait for the mesh to be registered to get it's id.
     auto const ew_post_id = engine.post(engine_t::register_object{ g::objects::make_ew<engine_t>(pyramid_mesh_post_id, [](
-        auto const& _e,
-        [[maybe_unused]] auto dt,
-        [[maybe_unused]] auto const& snapshot,
-        [[maybe_unused]] auto& engine
+        auto const& _e, auto, auto const& snapshot, auto& engine
     ){
         // Due to EW checking all event types we need to tell the compiler exactly what kind of event this is.
         // In this situation we know the event type (posted it just above), but in the middle of game code
@@ -332,7 +346,7 @@ auto load_scene(g::default_engine& engine) -> void
         auto const p1eid = engine.post(engine_t::register_object{ .object = {{
             .name = "Pyramid",
             .t = { .pos = {-1.5, 0.0f, -1.0f} },
-            .on_tick = [](auto& self, auto dt, auto, auto) { self.t.rot.y += dt; },
+            .on_tick = [](auto& self, auto dt, auto const&, auto&) { self.t.rot.y += dt; },
             .mesh_id = mesh_id,
         }}});
         fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid {{ .event_id={} }}\n", snapshot.id, p1eid);
@@ -342,7 +356,7 @@ auto load_scene(g::default_engine& engine) -> void
                 .pos = {0.5f, 0.0f, 0.0f},
                 .scale = {0.3f, 0.3f, 0.3f},
             },
-            .on_tick = [](auto& self, auto dt, auto, auto) { self.t.rot.z += dt; },
+            .on_tick = [](auto& self, auto dt, auto const&, auto&) { self.t.rot.z += dt; },
             .mesh_id = mesh_id,
         }}});
         fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid 2 {{ .event_id={} }}\n", snapshot.id, p2eid);

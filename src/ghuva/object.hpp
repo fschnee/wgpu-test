@@ -40,7 +40,7 @@ namespace ghuva
         {
             std::string name = "";
             transform t = {};
-            on_tick_t on_tick = [](auto, auto, auto, auto){};
+            on_tick_t on_tick = [](object&, float, snapshot_t const&, engine_t&){};
             u64 mesh_id = 0;
             bool draw = true;
             bool tick = true;
@@ -50,7 +50,7 @@ namespace ghuva
 
         auto look_at(fpoint const& target) -> object&;
 
-        on_tick_t on_tick = [](auto, auto, auto, auto){};
+        on_tick_t on_tick = [](object&, float, snapshot_t const&, engine_t&){};
     };
 }
 
