@@ -208,18 +208,20 @@ auto app::do_ui(f32 dt) -> void
 
             ImGui::PushItemWidth(150);
 
-            if(ImGui::Checkbox("Fixed Ticks per Frame", &ui.fixed_ticks_per_frame))
+            if(ImGui::Checkbox("Maintain smoothness", &ui.fixed_ticks_per_frame))
             {
                 outputs.do_engine_config_update = true;
 
                 if(ui.fixed_ticks_per_frame)
                 {
+                    ui.cached_target_tps = params.engine.tps; // When becomes true, we cache the old one.
                     outputs.target_tps = ghuva::m::clamp(
                         outputs.target_tps * 1.0f / outputs.target_time_multiplier,
                         0.0f,
                         params.engine.max_tps
                     );
                 }
+                else { outputs.target_tps = ui.cached_target_tps; } // And when it turns false we restore it.
             }
             ImGui::PushItemWidth(100);
             if(ImGui::InputFloat("Time multiplier", &outputs.target_time_multiplier, 0.1f, 0.5f))

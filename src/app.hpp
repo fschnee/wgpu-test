@@ -91,6 +91,9 @@ private:
         ghuva::u32 h = 400; // So it doesn't occlude the terminal on open.
 
         bool fixed_ticks_per_frame = false;
+        ghuva::f32 cached_target_tps = 120.0f; // Cache the last tps when we toggle
+                                               // fixed_ticks_per_frame so we can restore
+                                               // it on the next toggle.
     } ui;
 
     ghuva::context& ctx;
