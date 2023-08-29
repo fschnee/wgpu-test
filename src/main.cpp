@@ -9,6 +9,7 @@
 
 #include "ghuva/objects/eel.hpp"
 #include "ghuva/objects/ew.hpp"
+#include "ghuva/utils/math.hpp"
 #include "ghuva/utils/cvt.hpp"
 #include "ghuva/engine.hpp"
 
@@ -121,11 +122,38 @@ auto userdata::engine_load_scene() -> void
             .pos = {0.0, 0.0, 2.0},
             .rot = {-3.0f * M_PI / 4.0f, 0.0f, 0.0f},
         },
-        .on_tick = [](auto& self, auto, auto const& snapshot, auto& engine)
-        {
-            if(snapshot.camera_object_id != self.id)
-                engine.post(engine_t::set_camera{ .object_id = self.id });
-        }
+        .on_tick =
+            [
+                t = 0.0f,
+                currpoint = 0_u32,
+                path = std::vector<ghuva::fpoint>{
+                    {0.0f, 0.0f, 2.0f},
+                    {0.5f, 0.5f, 2.0f},
+                    {1.0f, 0.5f, 2.0f},
+                    {1.0f, 0.0f, 2.0f},
+                    {1.0f, -0.5f, 2.0f},
+                    {0.5f, -0.5f, 2.0f},
+                    {0.0f, -0.5f, 2.0f},
+                }
+            ](auto& self, auto dt, auto const& snapshot, auto& engine) mutable
+            {
+                if(snapshot.camera_object_id != self.id)
+                    engine.post(engine_t::set_camera{ .object_id = self.id });
+
+                t += dt;
+                if(t >= 1)
+                {
+                    currpoint += 2; // Porque tem 1 ponto de controle no meio.
+                    t -= 1;
+                }
+
+                const auto p1 = path[(currpoint + 0) % path.size()];
+                const auto p2 = path[(currpoint + 1) % path.size()];
+                const auto p3 = path[(currpoint + 2) % path.size()];
+
+                // From https://javascript.info/bezier-curve.
+                self.t.pos = g::m::satlerp( self.t.pos, (1-t)*(1-t)*p1 + 2*(1-t)*t*p2 + t*t*p3, dt);
+            },
     }}});
     fmt::print("[main.load_scene] Requested engine to register Camera {{ .event_id = {} }}\n", camera_post_id);
 
@@ -165,6 +193,13 @@ auto userdata::engine_load_scene() -> void
             .mesh_id = mesh_id,
         }}});
         fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid 2 {{ .event_id={} }}\n", snapshot.id, p2eid);
+
+        auto const p3eid = engine.post(engine_t::register_object{ .object = {{
+            .name = "Pyramid 3 (in origin)",
+            .t = { .scale = {0.4f, 0.4f, 0.4f } },
+            .mesh_id = mesh_id,
+        }}});
+        fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid 3 {{ .event_id={} }}\n", snapshot.id, p3eid);
 
         #if 0
         fmt::print("requesting a bunch-a pyramids, hold on\n");
