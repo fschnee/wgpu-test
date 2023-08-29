@@ -63,10 +63,8 @@ auto app::loop_impl(f32 dt) -> ghuva::context::loop_message
     build_scene_geometry();
     write_geometry_buffers();
     do_ui(dt);
-    if(params.transform_matrix_calculation_via_compute_pass)
-        compute_object_uniforms_directly(); // TODO: fixme.
-    else
-        compute_object_uniforms_directly();
+    if(compute_pass) compute_object_uniforms_via_compute_pass();
+    else             compute_object_uniforms_directly();
 
     return render();
 }
@@ -81,7 +79,7 @@ auto app::sync_params_to_outputs() -> void
 auto app::write_scene_uniform() -> void
 {
     // Then updating the uniform buffers.
-    auto const scene_uniforms = ghuva::context::scene_uniforms{
+    ui.scene_uniforms = {
         .view = ghuva::m4f::from_parts(params.camera.t.pos, params.camera.t.rot, params.camera.t.scale),
         .projection = ghuva::m4f::perspective({
             .focal_len    = params.camera.focal_len,
@@ -96,7 +94,7 @@ auto app::write_scene_uniform() -> void
         .time  = params.engine.total_time,
         .gamma = 2.2,
     };
-    ctx.device.getQueue().writeBuffer(ctx.scene_uniform_buffer, 0, &scene_uniforms, sizeof(scene_uniforms));
+    ctx.device.getQueue().writeBuffer(ctx.scene_uniform_buffer, 0, &ui.scene_uniforms, sizeof(ui.scene_uniforms));
 }
 
 auto app::build_scene_geometry() -> void
@@ -195,7 +193,7 @@ auto app::do_ui(f32 dt) -> void
         ImGui::Text("%s", frame_str.c_str());
         ImGui::SetCursorPosX(0);
 
-        if(ImGui::BeginMenu("Menu"))
+        if(ImGui::BeginMenu("Options"))
         {
             ImGui::PushItemWidth(100);
             ImGui::InputInt("Width",  &ui.w * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
@@ -246,38 +244,56 @@ auto app::do_ui(f32 dt) -> void
             ImGui::EndDisabled();
 
             ImGui::NewLine();
-            if(ImGui::BeginMenu("Windows"))
-            {
-                ImGui::MenuItem("Adapter limits", nullptr, &ui.window.adapter_info);
-                ImGui::MenuItem("ImGui Demo", nullptr, &ui.window.imgui_demo);
-                ImGui::EndMenu();
-            }
+            ImGui::Checkbox("Compute pass", &compute_pass);
+            ImGui::SameLine();
+            ui_help("Compute the per-object transformation matrixes using a compute pass instead of doing it on the CPU.\n\nFor scenes with a lot of objects, this *should* improve performance");
 
+            ImGui::EndMenu();
+        }
+
+        if(ImGui::BeginMenu("Windows"))
+        {
+            ImGui::MenuItem("Projection",     nullptr, &ui.window.projection);
+            ImGui::MenuItem("Adapter limits", nullptr, &ui.window.adapter_info);
+            ImGui::MenuItem("ImGui Demo",     nullptr, &ui.window.imgui_demo);
             ImGui::EndMenu();
         }
     }
     ImGui::EndMainMenuBar();
 
+    ui_draw_projection_window();
     ui_draw_limits_window();
     if(ui.window.imgui_demo) ImGui::ShowDemoWindow(&ui.window.imgui_demo);
+    // TODO: ui_draw_timings_window();
+    // TODO: Implement object search window with transform manipulation and mesh preview.
+}
 
-    if( ImGui::Begin("Projection") )
+// 'Borrowed' directly from imgui_demo.cpp.
+// Helper to display a little (?) mark which shows a tooltip when hovered.
+auto app::ui_help(const char* desc) -> void
+{
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort) && ImGui::BeginTooltip())
+    {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+        ImGui::TextUnformatted(desc);
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+}
+
+auto app::ui_draw_projection_window() -> void
+{
+    if(!ui.window.projection) return;
+
+    if(ImGui::Begin("Projection", &ui.window.projection))
     {
         ImGui::SliderFloat("near_plane", &params.camera.near_plane, 0.01f, 10.f);
         ImGui::SliderFloat("far_plane",  &params.camera.far_plane,  0.f,   100.f);
         ImGui::SliderFloat("focal_len",  &params.camera.focal_len,  0.f,   10.f);
 
-        // TODO: Implement object search window with transform manipulation and mesh preview.
-        //draw_matrix(scene_uniforms.projection, "Projection", "##projection");
-        //draw_matrix(scene_uniforms.view, "View", "##view");
-        //for(auto const& obj : snapshot.objects)
-        //{
-        //    draw_matrix(
-        //        ghuva::m4f::from_parts(obj.t.pos, obj.t.rot, obj.t.scale),
-        //        obj.name.c_str(),
-        //        obj.name.c_str()
-        //    );
-        //}
+        ui_draw_matrix(ui.scene_uniforms.projection, "Projection", "##projection");
+        ui_draw_matrix(ui.scene_uniforms.view,       "View",       "##view");
     }
     ImGui::End();
 }
@@ -382,7 +398,10 @@ auto app::compute_object_uniforms_directly() -> void
         ctx.object_uniform_stride * params.object_count
     );
     delete[] uniforms;
+}
 
+auto app::compute_object_uniforms_via_compute_pass() -> void
+{
     // TODO: fix compute pass.
     /*
     auto compute_pass = ctx.begin_compute();

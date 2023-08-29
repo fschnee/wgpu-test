@@ -37,10 +37,6 @@ struct app
         object const*      objects      = nullptr;
         ghuva::u64         object_count = 0;
 
-        // true  = use compute pass to calculate transforms.
-        // false = calculate transforms on the cpu.
-        bool transform_matrix_calculation_via_compute_pass = false;
-
         struct /* camera */
         {
             ghuva::transform t = {};
@@ -77,9 +73,12 @@ private:
     auto build_scene_geometry() -> void;
     auto write_geometry_buffers() -> void;
     auto do_ui(ghuva::f32 dt) -> void;
+        auto ui_help(const char*) -> void;
+        auto ui_draw_projection_window() -> void;
         auto ui_draw_limits_window() -> void;
         auto ui_draw_matrix(ghuva::m4f const& m, const char* panelname, const char* tablename) -> void;
     auto compute_object_uniforms_directly() -> void;
+    auto compute_object_uniforms_via_compute_pass() -> void;
     auto render() -> ghuva::context::loop_message;
         auto render_emit_draw_calls(wgpu::RenderPassEncoder render_pass) -> void;
 
@@ -87,6 +86,7 @@ private:
     {
         struct /* window */
         {
+            bool projection   = false;
             bool adapter_info = false;
             bool imgui_demo   = false;
         } window;
@@ -98,7 +98,13 @@ private:
         ghuva::f32 cached_target_tps = 120.0f; // Cache the last tps when we toggle
                                                // fixed_ticks_per_frame so we can restore
                                                // it on the next toggle.
+
+        ghuva::context::scene_uniforms scene_uniforms; // Cached for displaying to the user.
     } ui;
+
+    // true  = use compute pass to calculate transforms.
+    // false = calculate transforms on the cpu.
+    bool compute_pass = false;
 
     ghuva::context& ctx;
 

@@ -78,7 +78,6 @@ int main()
             .max_tps         = 100'000.f,
             .ticks           = snapshot.id - ud.last_snapshot_tick,
         };
-        app.params.transform_matrix_calculation_via_compute_pass = false;
 
         ud.meshes             = ghuva::move(snapshot.meshes); // It's fine to steal, the snapshot is a copy.
         app.params.meshes     = ud.meshes.data();
