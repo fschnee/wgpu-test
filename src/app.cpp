@@ -135,7 +135,7 @@ auto app::build_scene_geometry() -> void
     // Allocate this big ass bitch (if necessary).
     if(scene.buffer == nullptr || data_size > scene.buffer_size)
     {
-        fmt::print("[app] Allocating/Reallocating scene buffer to size {}bytes\n", data_size);
+        fmt::print("[app] Allocating/Reallocating scene buffer to size {} bytes\n", data_size);
         scene.buffer_size = data_size;
         delete[] scene.buffer;
         scene.buffer = new u8[scene.buffer_size];
@@ -197,18 +197,15 @@ auto app::do_ui(f32 dt) -> void
 
         if(ImGui::BeginMenu("Menu"))
         {
-            ImGui::PushItemWidth(150);
+            ImGui::PushItemWidth(100);
             ImGui::InputInt("Width",  &ui.w * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
-            ImGui::PushItemWidth(150);
+            ImGui::PushItemWidth(100);
             ImGui::InputInt("Height", &ui.h * cvt::rc<int*>, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue);
 
             ImGui::NewLine();
-            ImGui::MenuItem("Show Adapter limits", nullptr, &ui.adapter_info_menu_open);
-            ImGui::NewLine();
 
-            ImGui::PushItemWidth(150);
-
-            if(ImGui::Checkbox("Maintain smoothness", &ui.fixed_ticks_per_frame))
+            ImGui::PushItemWidth(100);
+            if(ImGui::Checkbox("Maintain TPS ratio", &ui.fixed_ticks_per_frame))
             {
                 outputs.do_engine_config_update = true;
 
@@ -224,7 +221,7 @@ auto app::do_ui(f32 dt) -> void
                 else { outputs.target_tps = ui.cached_target_tps; } // And when it turns false we restore it.
             }
             ImGui::PushItemWidth(100);
-            if(ImGui::InputFloat("Time multiplier", &outputs.target_time_multiplier, 0.1f, 0.5f))
+            if(ImGui::InputFloat("TMult", &outputs.target_time_multiplier, 0.1f, 0.5f))
             {
                 outputs.do_engine_config_update = true;
 
@@ -248,12 +245,21 @@ auto app::do_ui(f32 dt) -> void
             }
             ImGui::EndDisabled();
 
+            ImGui::NewLine();
+            if(ImGui::BeginMenu("Windows"))
+            {
+                ImGui::MenuItem("Adapter limits", nullptr, &ui.window.adapter_info);
+                ImGui::MenuItem("ImGui Demo", nullptr, &ui.window.imgui_demo);
+                ImGui::EndMenu();
+            }
+
             ImGui::EndMenu();
         }
     }
     ImGui::EndMainMenuBar();
 
     ui_draw_limits_window();
+    if(ui.window.imgui_demo) ImGui::ShowDemoWindow(&ui.window.imgui_demo);
 
     if( ImGui::Begin("Projection") )
     {
@@ -278,9 +284,9 @@ auto app::do_ui(f32 dt) -> void
 
 auto app::ui_draw_limits_window() -> void
 {
-    if(!ui.adapter_info_menu_open) return;
+    if(!ui.window.adapter_info) return;
 
-    if(ImGui::Begin("Adapter Limits", &ui.adapter_info_menu_open))
+    if(ImGui::Begin("Adapter Limits", &ui.window.adapter_info))
     {
         #define STRINGIFY(a) STRINGIFY_IMPL(a)
         #define STRINGIFY_IMPL(a) #a
