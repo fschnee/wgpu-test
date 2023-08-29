@@ -88,7 +88,7 @@ private:
         bool adapter_info_menu_open = false;
 
         ghuva::u32 w = 1280;
-        ghuva::u32 h = 640;
+        ghuva::u32 h = 400; // So it doesn't occlude the terminal on open.
 
         bool fixed_ticks_per_frame = false;
     } ui;

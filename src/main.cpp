@@ -17,7 +17,6 @@
 using namespace ghuva::aliases;
 namespace g   = ghuva;
 
-// TODO: refactor me out of here.
 struct userdata
 {
     using engine_t = g::default_engine;
@@ -48,7 +47,6 @@ int main()
     ud.engine_load_scene();
     ud.engine_start_ticking();
 
-    // TODO: why is it locked to 30 fps now ?
     app.loop(&ud, [](::app& app, [[maybe_unused]] f32 dt, auto* _ud)
     {
         auto& ud      = *(_ud * g::cvt::rc<userdata*>);

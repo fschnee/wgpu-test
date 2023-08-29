@@ -67,7 +67,6 @@ auto app::loop_impl(f32 dt) -> ghuva::context::loop_message
         compute_object_uniforms_directly(); // TODO: fixme.
     else
         compute_object_uniforms_directly();
-    render();
 
     return render();
 }
