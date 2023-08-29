@@ -47,7 +47,7 @@ namespace ghuva::objects::eel_impl
         );
     }
 
-    constexpr auto on_change_tps(auto const& snapshot, auto& self, auto const& e)
+    constexpr auto on_set_tps(auto const& snapshot, auto& self, auto const& e)
     {
         fmt::print(
             "[ghuva::engine/t{}][o{}/{}][e{}/o{}] Engine changed tps {{ .tps={} }}\n",
@@ -90,7 +90,7 @@ namespace ghuva::objects::eel_impl
                  GHUVA_EEL_FOREACH( typename engine_t::e_register_object, on_register_object )
             else GHUVA_EEL_FOREACH( typename engine_t::e_register_mesh,   on_register_mesh )
             else GHUVA_EEL_FOREACH( typename engine_t::e_delete_object,   on_delete_object )
-            else GHUVA_EEL_FOREACH( typename engine_t::e_change_tps,      on_change_tps )
+            else GHUVA_EEL_FOREACH( typename engine_t::e_set_tps,         on_set_tps )
             else GHUVA_EEL_FOREACH( typename engine_t::e_set_camera,      on_set_camera )
             else { for(auto const& e : el_vec) on_unkown_event(snapshot, self, e); }
         });
@@ -104,7 +104,10 @@ namespace ghuva::objects
     {
         return {typename object<Engine>::constructorargs{
             .name = "EEL",
-
+            .on_tick = [](auto& self, auto dt, auto const& snapshot, auto& engine)
+            {
+                eel_impl::on_tick(self, dt, snapshot, engine);
+            },
             .draw = false,
         }};
     }

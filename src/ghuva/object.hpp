@@ -5,6 +5,7 @@
 
 #include "utils/point.hpp"
 #include "utils/m4.hpp"
+#include "transform.hpp"
 #include "context.hpp"
 
 namespace ghuva
@@ -28,13 +29,7 @@ namespace ghuva
         u64 mesh_id = 0; // Registered by the engine. 0 = invalid.
         bool draw = true;
         bool tick = true;
-
-        struct transform
-        {
-            fpoint pos   = {0, 0, 0};
-            fpoint rot   = {0, 0, 0}; // In radians.
-            fpoint scale = {1, 1, 1};
-        } t;
+        transform t = {};
 
         struct constructorargs
         {

@@ -37,11 +37,16 @@ namespace ghuva::inline chrono
         template <typename Duration = std::chrono::duration<float>>
         constexpr auto since_beginning() const;
 
+        constexpr auto start_point()    const -> time_point { return start; }
+        constexpr auto previous_point() const -> time_point { return previous_segment_start; }
+        constexpr auto this_point()     const -> time_point { return this_segment_start; }
+
     private:
         time_point start;
-        time_point last_segment_start;
+        time_point previous_segment_start;
         time_point this_segment_start;
     };
+    using default_stopwatch = stopwatch< std::chrono::high_resolution_clock >;
 }
 
 // Implementations.
@@ -49,7 +54,7 @@ namespace ghuva::inline chrono
 template <typename Timer>
 constexpr ghuva::chrono::stopwatch<Timer>::stopwatch()
     : start{timer::now()}
-    , last_segment_start{start}
+    , previous_segment_start{start}
     , this_segment_start{start}
 {}
 
@@ -60,7 +65,7 @@ constexpr auto ghuva::chrono::stopwatch<Timer>::restart() -> stopwatch&
 template <typename Timer>
 constexpr auto ghuva::chrono::stopwatch<Timer>::click() -> stopwatch&
 {
-    last_segment_start = this_segment_start;
+    previous_segment_start = this_segment_start;
     this_segment_start = timer::now();
     return *this;
 }
@@ -68,7 +73,7 @@ constexpr auto ghuva::chrono::stopwatch<Timer>::click() -> stopwatch&
 template <typename Timer>
 template <typename Duration>
 constexpr auto ghuva::chrono::stopwatch<Timer>::last_segment() const
-{ return std::chrono::duration_cast<Duration>(this_segment_start - last_segment_start).count(); }
+{ return std::chrono::duration_cast<Duration>(this_segment_start - previous_segment_start).count(); }
 
 template <typename Timer>
 template <typename Duration>

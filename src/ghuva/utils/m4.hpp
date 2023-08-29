@@ -47,6 +47,9 @@ namespace ghuva
         template <typename Point>
         static constexpr auto from_parts(Point&& pos, Point&& rot, Point&& scale) -> m4;
 
+        template <typename Point>
+        static constexpr auto for_compute(Point&& pos, Point&& rot, Point&& scale) -> m4;
+
         // Members.
         T raw[4][4] = {0};
     };
@@ -264,5 +267,25 @@ namespace ghuva
             .yRotate(rot.y)
             .xRotate(rot.x)
             .scale(scale.x, scale.y, scale.x);
+    }
+
+    // TODO: is this correct ?
+    template <typename T>
+    template <typename Point>
+    constexpr auto m4<T>::for_compute(Point&& pos, Point&& rot, Point&& scale) -> m4
+    {
+        auto out = m4{};
+
+        out.raw[0][0] = pos.x;
+        out.raw[0][1] = pos.y;
+        out.raw[0][2] = pos.z;
+        out.raw[1][0] = rot.x;
+        out.raw[1][1] = rot.y;
+        out.raw[1][2] = rot.z;
+        out.raw[2][0] = scale.x;
+        out.raw[2][1] = scale.y;
+        out.raw[2][2] = scale.z;
+
+        return out;
     }
 }
