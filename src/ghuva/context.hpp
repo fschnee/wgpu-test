@@ -123,6 +123,7 @@ namespace ghuva
         const ghuva::u32 object_uniform_limit = 100'000;
         // And this is the stride of the elements.
         ghuva::u32 object_uniform_stride;
+        ghuva::u32 compute_uniform_stride;
 
         // Write into the object_uniform_buffer, then
         // get a compute_pass from begin_compute().
@@ -137,6 +138,9 @@ namespace ghuva
         // The limits for these buffers
         const ghuva::u64 vertex_count = 3'000'000;
         const ghuva::u64 index_count  = 1'000'000;
+
+        // TODO: removeme!
+        wgpu::Buffer mapbuf = {nullptr};
 
         // Write into the vertex buffers as needed, then
         // get your render_pass from begin_render().

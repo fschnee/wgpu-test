@@ -18,6 +18,7 @@ struct app
     {
         ghuva::u64 mesh_id;
         ghuva::transform t;
+        ghuva::u64 mesh_index; // Maintained by the app, don't worry about it.
     };
 
     struct /* params */ // Set these from your own callback during loop.
@@ -32,10 +33,13 @@ struct app
         } engine;
 
         // You cleanup after yourself, we only want a view into these vectors.
-        ghuva::mesh const* meshes       = nullptr;
-        ghuva::u64         mesh_count   = 0;
-        object const*      objects      = nullptr;
-        ghuva::u64         object_count = 0;
+        // You are expected to verify that all objects have valid mesh_ids and
+        // only the mesh_ids used are in the mesh vector.
+        // NOTE: notice how these are not const*, we WILL modify their contents.
+        ghuva::mesh* meshes       = nullptr;
+        ghuva::u64   mesh_count   = 0;
+        object *     objects      = nullptr;
+        ghuva::u64   object_count = 0;
 
         struct /* camera */
         {
@@ -77,8 +81,7 @@ private:
         auto ui_draw_projection_window() -> void;
         auto ui_draw_limits_window() -> void;
         auto ui_draw_matrix(ghuva::m4f const& m, const char* panelname, const char* tablename) -> void;
-    auto compute_object_uniforms_directly() -> void;
-    auto compute_object_uniforms_via_compute_pass() -> void;
+    auto compute_transform_matrix_via_compute_pass() -> void;
     auto render() -> ghuva::context::loop_message;
         auto render_emit_draw_calls(wgpu::RenderPassEncoder render_pass) -> void;
 
@@ -102,9 +105,9 @@ private:
         ghuva::context::scene_uniforms scene_uniforms; // Cached for displaying to the user.
     } ui;
 
-    // true  = use compute pass to calculate transforms.
-    // false = calculate transforms on the cpu.
-    bool compute_pass = false;
+    // true  = use compute pass to calculate object transforms.
+    // false = calculate object transforms on the cpu.
+    bool compute_pass = true;
 
     ghuva::context& ctx;
 
@@ -113,6 +116,7 @@ private:
         struct mesh_data
         {
             ghuva::u64 id;
+            ghuva::u64 instance_count;
             ghuva::u64 start_index;
             ghuva::u64 index_count;
             ghuva::u64 start_vertex;
@@ -129,7 +133,11 @@ private:
         ghuva::u8* index_start    = nullptr;
 
         // The sizes of the individual buffers (position, color, normal, index), in bytes.
-        ghuva::u64 vertex_buf_size = 0;
-        ghuva::u64 index_buf_size  = 0;
+        ghuva::u64 vertex_buf_size   = 0;
+        ghuva::u64 index_buf_size    = 0;
+
+        // The instance buffer is separate since meshes seldom change, while objects often do.
+        ghuva::u8* instance_buffer   = nullptr;
+        ghuva::u64 instance_buf_size = 0;
     } scene;
 };

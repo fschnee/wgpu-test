@@ -63,8 +63,7 @@ auto app::loop_impl(f32 dt) -> ghuva::context::loop_message
     build_scene_geometry();
     write_geometry_buffers();
     do_ui(dt);
-    if(compute_pass) compute_object_uniforms_via_compute_pass();
-    else             compute_object_uniforms_directly();
+    if(compute_pass) compute_transform_matrix_via_compute_pass();
 
     return render();
 }
@@ -104,6 +103,13 @@ auto app::build_scene_geometry() -> void
     scene.geometry_offsets.clear();
     scene.geometry_offsets.reserve(params.mesh_count);
 
+    // Prepare for instancing.
+    std::sort(
+        params.meshes,
+        params.meshes + params.mesh_count,
+        [](auto a, auto b){ return a.id < b.id; }
+    ); // Sort by id ASC.
+
     // Build the geometry_offsets first so we can do the buffer allocation all at once using the sizes found.
     auto curr_idx    = 0_u64;
     auto curr_vertex = 0_u64;
@@ -113,6 +119,7 @@ auto app::build_scene_geometry() -> void
 
         scene.geometry_offsets.push_back({
             .id = mesh.id,
+            .instance_count = 0,
             .start_index = curr_idx,
             .index_count = mesh.indexes.size(),
             .start_vertex = curr_vertex,
@@ -133,7 +140,7 @@ auto app::build_scene_geometry() -> void
     // Allocate this big ass bitch (if necessary).
     if(scene.buffer == nullptr || data_size > scene.buffer_size)
     {
-        fmt::print("[app] Allocating/Reallocating scene buffer to size {} bytes\n", data_size);
+        fmt::print("[app] Allocating/Reallocating scene geometry buffer to size {} bytes\n", data_size);
         scene.buffer_size = data_size;
         delete[] scene.buffer;
         scene.buffer = new u8[scene.buffer_size];
@@ -145,7 +152,7 @@ auto app::build_scene_geometry() -> void
     scene.normal_start   = scene.color_start    + scene.vertex_buf_size;
     scene.index_start    = scene.normal_start   + scene.vertex_buf_size;
 
-    // Finally, copy all the mesh data into our big buffer.
+    // Copy all the mesh data into our big buffer.
     auto index_offset  = 0_u64;
     auto vertex_offset = 0_u64;
     for(auto i = 0_u64; i < params.mesh_count; ++i)
@@ -163,16 +170,66 @@ auto app::build_scene_geometry() -> void
         vertex_offset += vertex_walk;
         index_offset  += index_walk;
     }
+
+    // And finally, build our instancing buffer.
+    if(params.object_count == 0) return;
+
+    scene.instance_buf_size = params.object_count * ctx.object_uniform_stride;
+    if(scene.instance_buffer == nullptr || data_size > scene.buffer_size)
+    {
+        fmt::print("[app] Allocating/Reallocating scene instancing buffer to size {} bytes\n", scene.instance_buf_size);
+        delete[] scene.instance_buffer;
+        scene.instance_buffer = new u8[scene.instance_buf_size];
+    }
+
+    std::sort(
+        params.objects,
+        params.objects + params.object_count,
+        [](auto a, auto b){ return a.mesh_id < b.mesh_id; }
+    ); // Sort by mesh_id ASC.
+
+    auto last_mesh_id    = params.objects[0].mesh_id;
+    auto last_mesh_index = 0_u64;
+    for(auto i = 0_u64; i < params.object_count; ++i)
+    {
+        auto& obj = params.objects[i];
+        if(obj.mesh_id != last_mesh_id) ++last_mesh_index;
+
+        ++scene.geometry_offsets[last_mesh_index].instance_count;
+
+        auto const offset = scene.instance_buffer + i * sizeof(ghuva::context::object_uniforms);
+        if(compute_pass)
+        {
+            new (offset) ghuva::context::compute_object_uniforms{
+                .pos   = {obj.t.pos.x,   obj.t.pos.y,   obj.t.pos.z},
+                .rot   = {obj.t.rot.x,   obj.t.rot.y,   obj.t.rot.z},
+                .scale = {obj.t.scale.x, obj.t.scale.y, obj.t.scale.z},
+            };
+        }
+        else
+        {
+            new (offset) ghuva::context::object_uniforms{ ghuva::m4f::from_parts(
+                obj.t.pos,
+                obj.t.rot,
+                obj.t.scale
+            )};
+        }
+
+        last_mesh_id = obj.mesh_id;
+    }
 }
 
 auto app::write_geometry_buffers() -> void
 {
-    if(scene.buffer == nullptr) return;
+    if(scene.buffer == nullptr || scene.buffer_size == 0) return;
 
-    ctx.device.getQueue().writeBuffer(ctx.vertex_buffer, 0, scene.position_start, scene.vertex_buf_size);
-    ctx.device.getQueue().writeBuffer(ctx.color_buffer,  0, scene.color_start,    scene.vertex_buf_size);
-    ctx.device.getQueue().writeBuffer(ctx.normal_buffer, 0, scene.normal_start,   scene.vertex_buf_size);
-    ctx.device.getQueue().writeBuffer(ctx.index_buffer,  0, scene.index_start,    scene.index_buf_size);
+    ctx.device.getQueue().writeBuffer(ctx.vertex_buffer,         0, scene.position_start,  scene.vertex_buf_size);
+    ctx.device.getQueue().writeBuffer(ctx.color_buffer,          0, scene.color_start,     scene.vertex_buf_size);
+    ctx.device.getQueue().writeBuffer(ctx.normal_buffer,         0, scene.normal_start,    scene.vertex_buf_size);
+    ctx.device.getQueue().writeBuffer(ctx.index_buffer,          0, scene.index_start,     scene.index_buf_size);
+
+    if(scene.instance_buffer == nullptr || scene.instance_buf_size == 0) return;
+    ctx.device.getQueue().writeBuffer(ctx.object_uniform_buffer, 0, scene.instance_buffer, scene.instance_buf_size);
 }
 
 auto app::do_ui(f32 dt) -> void
@@ -377,41 +434,19 @@ auto app::ui_draw_matrix(ghuva::m4f const& m, const char* panelname, const char*
     ImGui::EndGroupPanel();
 }
 
-auto app::compute_object_uniforms_directly() -> void
+auto app::compute_transform_matrix_via_compute_pass() -> void
 {
-    // Since it's much faster to write a single big buffer with the
-    // expected stride than many small writes with the stride as offset
-    // we'll just allocate raw bytes here and do a big ass copy at the end.
-    // NOTE: trust me, i've measured.
-    u8* uniforms = new u8[ctx.object_uniform_stride * params.object_count];
-    for(auto i = 0_u64; i < params.object_count; ++i)
-    {
-        // Placement new this bitch directly in the buffer.
-        new (uniforms + i * ctx.object_uniform_stride) ghuva::context::object_uniforms{
-            ghuva::m4f::from_parts(params.objects[i].t.pos, params.objects[i].t.rot, params.objects[i].t.scale)
-        };
-    }
-    ctx.device.getQueue().writeBuffer(
-        ctx.object_uniform_buffer,
-        0,
-        uniforms,
-        ctx.object_uniform_stride * params.object_count
-    );
-    delete[] uniforms;
-}
+    if(scene.instance_buffer == nullptr || scene.instance_buf_size == 0) return;
 
-auto app::compute_object_uniforms_via_compute_pass() -> void
-{
-    // TODO: fix compute pass.
-    /*
     auto compute_pass = ctx.begin_compute();
+
     compute_pass.setPipeline(ctx.compute_pipeline);
     compute_pass.setBindGroup(0, ctx.compute_bind_group, 0, nullptr);
-    auto const workgroup_size = 32; // Defined in the shader.
-    auto const dispatched = (uniform_count + workgroup_size - 1) / workgroup_size; // Round up.
+    auto const workgroup_size = 64; // Defined in the shader.
+    auto const dispatched     = (params.object_count + workgroup_size - 1) / workgroup_size; // Round up.
     compute_pass.dispatchWorkgroups(dispatched, 1, 1);
+
     ctx.end_compute(compute_pass);
-    */
 }
 
 auto app::render() -> ghuva::context::loop_message
@@ -429,28 +464,30 @@ auto app::render() -> ghuva::context::loop_message
 
 auto app::render_emit_draw_calls(wgpu::RenderPassEncoder render_pass) -> void
 {
-    if(scene.buffer == nullptr) return;
+    if(scene.instance_buffer == nullptr || scene.instance_buf_size == 0) return;
+    if(scene.buffer == nullptr          || scene.buffer_size == 0)       return;
 
     render_pass.setPipeline(ctx.pipeline);
     render_pass.setBindGroup(0, ctx.scene_bind_group, 0, nullptr);
     render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, scene.vertex_buf_size);
     render_pass.setVertexBuffer(1, ctx.color_buffer,  0, scene.vertex_buf_size);
     render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, scene.vertex_buf_size);
+    render_pass.setVertexBuffer(3, ctx.object_uniform_buffer, 0, scene.instance_buf_size);
     render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, scene.index_buf_size);
 
-    auto dynamic_bind_offset = 0_u32;
-    for(auto i = 0_u64; i < params.object_count; ++i)
+    auto curr_instance = 0_u32;
+    for(auto m : scene.geometry_offsets)
     {
-        // TODO: hash map time ?
-        auto mesh_info = std::find_if(scene.geometry_offsets.begin(), scene.geometry_offsets.end(), [&](auto& m){ return m.id == params.objects[i].mesh_id; });
+        if(m.instance_count == 0) continue;
 
-        if(mesh_info != scene.geometry_offsets.end())
-        {
-            render_pass.setBindGroup(1, ctx.object_bind_group, 1, &dynamic_bind_offset);
-            render_pass.drawIndexed(mesh_info->index_count, 1, mesh_info->start_index, mesh_info->start_vertex, 0);
-        }
-        else { /* TODO: error out or print error */ }
+        render_pass.drawIndexed(
+            m.index_count,
+            m.instance_count,
+            m.start_index,
+            m.start_vertex,
+            curr_instance
+        );
 
-        dynamic_bind_offset += ctx.object_uniform_stride;
+        curr_instance += m.instance_count;
     }
 }

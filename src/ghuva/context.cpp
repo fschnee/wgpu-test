@@ -225,22 +225,22 @@ auto ghuva::context::init_bindings() -> void
     }});
     std::cout << "\t" << this->bind_group_layouts[0] << std::endl;
 
-    std::cout << "[wgpu] Creating uniform bind group 1 (object) layout ..." << std::endl;
-    this->bind_group_layouts[1] = this->create_bind_group_layout({{{
-        .nextInChain = nullptr,
-        .binding = 0,
-        .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
-        .buffer = {
-            .nextInChain = nullptr,
-            .type = wgpu::BufferBindingType::Uniform,
-            .hasDynamicOffset = true,
-            .minBindingSize = sizeof(object_uniforms),
-        },
-        .sampler        = {},
-        .texture        = {},
-        .storageTexture = {},
-    }}});
-    std::cout << "\t" << this->bind_group_layouts[1] << std::endl;
+    //std::cout << "[wgpu] Creating uniform bind group 1 (object) layout ..." << std::endl;
+    //this->bind_group_layouts[1] = this->create_bind_group_layout({{{
+    //    .nextInChain = nullptr,
+    //    .binding = 0,
+    //    .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
+    //    .buffer = {
+    //        .nextInChain = nullptr,
+    //        .type = wgpu::BufferBindingType::Uniform,
+    //        .hasDynamicOffset = true,
+    //        .minBindingSize = sizeof(object_uniforms),
+    //    },
+    //    .sampler        = {},
+    //    .texture        = {},
+    //    .storageTexture = {},
+    //}}});
+    //std::cout << "\t" << this->bind_group_layouts[1] << std::endl;
 
      // Uniform.
 	this->desc.bindings[0] = {
@@ -253,15 +253,15 @@ auto ghuva::context::init_bindings() -> void
         .textureView = nullptr,
     };
 
-    this->desc.bindings[1] = {
-        .nextInChain = nullptr,
-        .binding = 0,
-        .buffer = this->object_uniform_buffer,
-        .offset = 0,
-        .size = sizeof(object_uniforms),
-        .sampler = nullptr,
-        .textureView = nullptr,
-    };
+    //this->desc.bindings[1] = {
+    //    .nextInChain = nullptr,
+    //    .binding = 0,
+    //    .buffer = this->object_uniform_buffer,
+    //    .offset = 0,
+    //    .size = sizeof(object_uniforms),
+    //    .sampler = nullptr,
+    //    .textureView = nullptr,
+    //};
 
     this->desc.scene_bind_group_descriptor = {
         .nextInChain = nullptr,
@@ -274,16 +274,16 @@ auto ghuva::context::init_bindings() -> void
     this->scene_bind_group = device.createBindGroup(this->desc.scene_bind_group_descriptor);
     std::cout << "\t" << this->scene_bind_group << std::endl;
 
-    this->desc.object_bind_group_descriptor = {
-        .nextInChain = nullptr,
-        .label = "Object bind group",
-        .layout = this->bind_group_layouts[1],
-        .entryCount = 1,
-        .entries = &this->desc.bindings[1]
-    };
-    std::cout << "[wgpu] Creating object Bind Group..." << std::endl;
-    this->object_bind_group = device.createBindGroup(this->desc.object_bind_group_descriptor);
-    std::cout << "\t" << this->object_bind_group << std::endl;
+    //this->desc.object_bind_group_descriptor = {
+    //    .nextInChain = nullptr,
+    //    .label = "Object bind group",
+    //    .layout = this->bind_group_layouts[1],
+    //    .entryCount = 1,
+    //    .entries = &this->desc.bindings[1]
+    //};
+    //std::cout << "[wgpu] Creating object Bind Group..." << std::endl;
+    //this->object_bind_group = device.createBindGroup(this->desc.object_bind_group_descriptor);
+    //std::cout << "\t" << this->object_bind_group << std::endl;
 
     // Compute bindings below.
     this->desc.bindings[2] = {
@@ -291,7 +291,7 @@ auto ghuva::context::init_bindings() -> void
         .binding = 0,
         .buffer = this->object_uniform_buffer,
         .offset = 0,
-        .size = sizeof(object_uniforms),
+        .size = this->object_uniform_limit * sizeof(compute_object_uniforms),
         .sampler = nullptr,
         .textureView = nullptr,
     };
@@ -303,7 +303,7 @@ auto ghuva::context::init_bindings() -> void
         .visibility = wgpu::ShaderStage::Compute,
         .buffer = {
             .nextInChain = nullptr,
-            .type = wgpu::BufferBindingType::ReadOnlyStorage,
+            .type = wgpu::BufferBindingType::Storage,
             .hasDynamicOffset = false,
             .minBindingSize = sizeof(compute_object_uniforms),
         },
@@ -329,7 +329,7 @@ auto ghuva::context::init_render_pipeline() -> void
     this->desc.pipeline_layout = {
         .nextInChain = nullptr,
         .label = "Pipeline layout",
-        .bindGroupLayoutCount = 2,
+        .bindGroupLayoutCount = 1,
         .bindGroupLayouts = (WGPUBindGroupLayout*)this->bind_group_layouts
     };
     std::cout << "[wgpu] Creating pipeline layout..." << std::endl;
@@ -347,9 +347,29 @@ auto ghuva::context::init_render_pipeline() -> void
         .shaderLocation = 1, // @location(1).
     });
     this->desc.vertex_buffer_attributes.push_back({
-        .format = wgpu::VertexFormat::Float32x3,
+        .format = wgpu::VertexFormat::Float32x3,  // nx,ny,z
         .offset = 0,
         .shaderLocation = 2, // @location(2)
+    });
+    this->desc.vertex_buffer_attributes.push_back({
+        .format = wgpu::VertexFormat::Float32x4,
+        .offset = 0,
+        .shaderLocation = 3,
+    });
+    this->desc.vertex_buffer_attributes.push_back({
+        .format = wgpu::VertexFormat::Float32x4,
+        .offset = 4 * sizeof(f32),
+        .shaderLocation = 4,
+    });
+    this->desc.vertex_buffer_attributes.push_back({
+        .format = wgpu::VertexFormat::Float32x4,
+        .offset = 8 * sizeof(f32),
+        .shaderLocation = 5,
+    });
+    this->desc.vertex_buffer_attributes.push_back({
+        .format = wgpu::VertexFormat::Float32x4,
+        .offset = 12 * sizeof(f32),
+        .shaderLocation = 6,
     });
     this->desc.vertex_buffer_layouts.push_back({
         .arrayStride = 3 * sizeof(context::vertex_t), // xyz
@@ -368,6 +388,12 @@ auto ghuva::context::init_render_pipeline() -> void
         .stepMode = wgpu::VertexStepMode::Vertex,
         .attributeCount = 1,
         .attributes = &this->desc.vertex_buffer_attributes[2]
+    });
+    this->desc.vertex_buffer_layouts.push_back({
+        .arrayStride = sizeof(context::object_uniforms),
+        .stepMode = wgpu::VertexStepMode::Instance,
+        .attributeCount = 4,
+        .attributes = &this->desc.vertex_buffer_attributes[3]
     });
 
     auto depth_stencil_state = wgpu::DepthStencilState{};
@@ -488,6 +514,13 @@ auto ghuva::context::init_buffers() -> void
         sizeof(ghuva::context::object_uniforms),
         this->limits.device.limits.minUniformBufferOffsetAlignment
     );
+    this->compute_uniform_stride = ceil_to_next_multiple(
+        sizeof(ghuva::context::compute_object_uniforms),
+        this->limits.device.limits.minStorageBufferOffsetAlignment
+    );
+    assert(this->object_uniform_stride == this->compute_uniform_stride);
+    assert(this->object_uniform_stride == sizeof(ghuva::context::compute_object_uniforms));
+    assert(this->object_uniform_stride == sizeof(ghuva::context::object_uniforms));
 
     std::cout << "[wgpu] Creating vertex buffer..." << std::endl;
     this->desc.vertex_buffer = {
@@ -544,12 +577,12 @@ auto ghuva::context::init_buffers() -> void
     this->scene_uniform_buffer = device.createBuffer(this->desc.scene_uniform_buffer);
     std::cout << "\t" << this->scene_uniform_buffer << std::endl;
 
-    std::cout << "[wgpu] Creating object uniform buffer..." << std::endl;
+    std::cout << "[wgpu] Creating object vertex buffer..." << std::endl;
 	this->desc.object_uniform_buffer = {
         .nextInChain = nullptr,
         .label = "Object uniform buffer",
-        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform | wgpu::BufferUsage::Storage /* In case you want to compute through a compute shader */,
-        .size = this->object_uniform_stride * (this->object_uniform_limit - 1) + sizeof(object_uniforms),
+        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Vertex | wgpu::BufferUsage::Storage,
+        .size = this->object_uniform_limit * sizeof(object_uniforms),
         .mappedAtCreation = false,
     };
     this->object_uniform_buffer = device.createBuffer(this->desc.object_uniform_buffer);

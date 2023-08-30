@@ -274,7 +274,6 @@ constexpr auto ghuva::engine<T, T2>::take_snapshot() -> snapshot
     return temp;
 }
 
-// TODO: make thread-safe.
 template <typename T, typename T2>
 constexpr auto ghuva::engine<T, T2>::tick(f32 real_dt) -> u64
 {
@@ -393,8 +392,7 @@ constexpr auto ghuva::engine<T, T2>::fixed_tick(f32 dt) -> void
 
     // Do the tick proper.
     temp.engine_perf.object_ticks = ghuva::chrono::time([&]{
-        //#pragma omp parallel for
-        // TODO: omp overhead too big, replace for something else.
+        // TODO: omp overhead too big. Threadpool witch batching ?
         for(auto& obj : temp.objects) if(obj.tick) obj.on_tick(obj, dt, temp, *this);
     });
 
@@ -416,11 +414,17 @@ constexpr auto ghuva::engine<T, T2>::post(E&& event, u64 source_id) -> u64
 
     if constexpr(engine::postboard_t::template supports<Event>)
     {
+        u64 last_id;
+        {
+            std::shared_lock lock(this->last_snapshot_mutex);
+            last_id = this->last_snapshot.id;
+        }
+
         std::unique_lock lock(this->partial_snapshot_mutex);
         this->partial_snapshot.postboard.template get< Event >().push_back({
             .id = this->partial_snapshot.engine_config.last_event_id++,
             .source_object_id = source_id,
-            .posted_at_tick = this->last_snapshot.id, // TODO: is this correct ?
+            .posted_at_tick = last_id,
             .body = ghuva::forward<E>(event)
         });
         return this->partial_snapshot.engine_config.last_event_id - 1;
@@ -436,12 +440,18 @@ constexpr auto ghuva::engine<T, T2>::message(M&& message, u64 target_id, u64 sou
 
     if constexpr(engine::messageboard_t::template supports<Message>)
     {
+        u64 last_id;
+        {
+            std::shared_lock lock(this->last_snapshot_mutex);
+            last_id = this->last_snapshot.id;
+        }
+
         std::unique_lock lock(this->partial_snapshot_mutex);
         this->partial_snapshot.messageboard.template get< Message >().push_back({
             .id = this->partial_snapshot.engine_config.last_message_id++,
             .target_object_id = target_id,
             .source_object_id = source_id,
-            .posted_at_tick = this->last_snapshot.id, // TODO: is this correct ?
+            .posted_at_tick = last_id,
             .body = ghuva::forward<M>(message)
         });
         return this->partial_snapshot.engine_config.last_event_id - 1;

@@ -1,11 +1,11 @@
 R"(
-fn tran(v: vec4f) -> mat4x4f
+fn tran(v: vec3f) -> mat4x4f
 {
     return mat4x4f(
-        1.0, 0.0, 0.0, v.x,
-        0.0, 1.0, 0.0, v.y,
-        0.0, 0.0, 1.0, v.z,
-        0.0, 0.0, 0.0, 1.0
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        v.x, v.y, v.z, 1.0
     );
 }
 
@@ -45,7 +45,7 @@ fn zrot(z: f32) -> mat4x4f
     );
 }
 
-fn scal(s: vec4f) -> mat4x4f
+fn scal(s: vec3f) -> mat4x4f
 {
     return mat4x4f(
         s.x, 0.0, 0.0, 0.0,
@@ -57,17 +57,17 @@ fn scal(s: vec4f) -> mat4x4f
 
 @group(0) @binding(0) var<storage, read_write> transform_buffer: array<mat4x4f>;
 
-@compute @workgroup_size(32)
+@compute @workgroup_size(64)
 fn compute(@builtin(global_invocation_id) id: vec3<u32>)
 {
-    let in: mat4x4f = transform_buffer[id.x];
-    let transform =
-          transpose( tran(in[0]) )
-        * transpose( zrot(in[1].x) )
-        * transpose( yrot(in[1].y) )
-        * transpose( xrot(in[2].x) )
-        * scal(in[3]);
+    if(id.x >= arrayLength(&transform_buffer)) { return; }
 
-    transform_buffer[id.x] = transform;
+    let in: mat4x4f = transform_buffer[id.x];
+
+    transform_buffer[id.x] = tran(in[0].xyz)
+        * zrot(in[1].z)
+        * yrot(in[1].y)
+        * xrot(in[1].x)
+        * scal(in[2].xyz);
 }
 )"

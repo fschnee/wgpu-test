@@ -30,7 +30,7 @@ struct userdata
 
     // Since we need to have these survive more than 1 frame.
     std::vector<app::object> rendered_objs;
-    std::vector<ghuva::mesh> meshes;
+    std::vector<g::mesh>     meshes;
 
     auto engine_load_scene() -> void;
     auto engine_start_ticking() -> void;
@@ -51,6 +51,7 @@ int main()
     app.loop(&ud, [](::app& app, [[maybe_unused]] f32 dt, auto* _ud)
     {
         auto& ud      = *(_ud * g::cvt::rc<userdata*>);
+        // TODO: query only the snapshot id, if new_id > ud.last_snapshot_id we actually take it.
         auto snapshot = ud.engine.take_snapshot(); // Take a copy of the latest snapshot.
 
         if(app.outputs.do_engine_config_update)
@@ -88,7 +89,7 @@ int main()
         for(auto const& obj : snapshot.objects)
         {
             if(obj.draw && obj.mesh_id != 0)
-                ud.rendered_objs.push_back({ .mesh_id = obj.mesh_id, .t = obj.t });
+                ud.rendered_objs.push_back({ .mesh_id = obj.mesh_id, .t = obj.t, .mesh_index = 0 /*dummy*/});
 
             // Update camera transform if this is the camera object.
             if(obj.id == snapshot.camera_object_id)
@@ -165,7 +166,17 @@ auto userdata::engine_load_scene() -> void
     }});
     fmt::print("[main.load_scene] Requested engine to register pyramid_mesh {{ .event_id = {} }}\n", pyramid_mesh_post_id);
 
-    // Our pyramid loader will wait for the mesh to be registered to get it's id.
+    // Other pyramids, just to have more data on the engine.
+    for(auto i = 0_u64; i < 10; ++i)
+        engine.post(engine_t::register_mesh{ .mesh = {
+            .id = 0,
+            .vertexes = { -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.0, +0.0, +0.5, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, +0.0, +0.0, +0.5, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, +0.0, +0.0, +0.5, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.0, +0.0, +0.5 },
+            .colors  = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 },
+            .normals = { 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53 },
+            .indexes  = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+        }});
+
+    // Our pyramid loader will wait for the (original) mesh to be registered to get it's id.
     auto const ew_post_id = engine.post(engine_t::register_object{ g::objects::make_ew<engine_t>(pyramid_mesh_post_id, [](
         auto const& _e, auto, auto const& snapshot, auto& engine
     ){
@@ -178,7 +189,7 @@ auto userdata::engine_load_scene() -> void
         auto const p1eid = engine.post(engine_t::register_object{ .object = {{
             .name = "Pyramid",
             .t = { .pos = {-1.5, 0.0f, -1.0f} },
-            .on_tick = [](auto& self, auto dt, auto const&, auto&) { self.t.rot.y += dt; },
+            .on_tick = [](auto& self, auto dt, auto const&, auto&) { self.t.rot.z += dt; },
             .mesh_id = mesh_id,
         }}});
         fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid {{ .event_id={} }}\n", snapshot.id, p1eid);
@@ -200,7 +211,7 @@ auto userdata::engine_load_scene() -> void
         }}});
         fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid 3 {{ .event_id={} }}\n", snapshot.id, p3eid);
 
-        #if 0
+        #if 1
         fmt::print("requesting a bunch-a pyramids, hold on\n");
         for(auto i = 0_u64; i < 80'000; ++i)
             engine.post(engine_t::register_object{ .object = {{

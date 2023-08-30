@@ -9,19 +9,18 @@ struct scene_uniforms
     gamma: f32,
 };
 
-struct object_uniforms
-{
-    transform: mat4x4f
-};
-
 @group(0) @binding(0) var<uniform> s: scene_uniforms;
-@group(1) @binding(0) var<uniform> o: object_uniforms;
 
 struct VertIn
 {
     @location(0) position: vec3f,
     @location(1) color: vec3f,
     @location(2) normal: vec3f,
+
+    @location(3) t1: vec4f,
+    @location(4) t2: vec4f,
+    @location(5) t3: vec4f,
+    @location(6) t4: vec4f,
 };
 
 struct FragIn
@@ -35,10 +34,12 @@ struct FragIn
 @vertex
 fn vert(in: VertIn) -> FragIn
 {
+    let transform = mat4x4f(in.t1, in.t2, in.t3, in.t4);
+
     var out: FragIn;
-    out.position = s.projection * s.view * o.transform * vec4f(in.position, 1.0);
+    out.position = s.projection * s.view * transform * vec4f(in.position, 1.0);
     out.color    = in.color;
-    out.normal   = (o.transform * vec4f(in.normal, 0.0)).xyz; // Make lighting direction-dependent.
+    out.normal   = (transform * vec4f(in.normal, 0.0)).xyz; // Make lighting direction-dependent.
     return out;
 }
 
