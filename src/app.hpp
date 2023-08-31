@@ -5,6 +5,7 @@
 
 #include "ghuva/context.hpp"
 
+#include "ghuva/utils/container.hpp"
 #include "ghuva/utils/aliases.hpp"
 #include "ghuva/utils/point.hpp"
 #include "ghuva/transform.hpp"
@@ -25,11 +26,16 @@ struct app
     {
         struct /* engine */
         {
+            // Engine config stuff.
             ghuva::f32 total_time         = 0.f; // Can be different due to time dilation.
             ghuva::f32 tps                = 120.f;
             ghuva::f32 time_multiplier    = 1.f;
             ghuva::f32 max_tps            = 100'000.f;
             ghuva::u64 ticks              = 0; // Since last loop.
+            bool       parallel_ticking   = true; // Is parallel ticking enabled on the engine ?
+
+            // Main loop config stuff.
+            bool has_own_thread = true; // Is the engine running on a dedicated thread ?
         } engine;
 
         // You cleanup after yourself, we only want a view into these vectors.
@@ -55,10 +61,13 @@ struct app
 
     struct /* outputs */ // Read these and communicate them back to the engine.
     {
-        bool do_engine_config_update = false; // Whether or not to communicate these
-                                              // params back to the engine.
-        ghuva::f32 target_tps;
-        ghuva::f32 target_time_multiplier;
+        bool do_engine_config_update = true; // Whether or not to communicate these
+                                             // params back to the engine.
+        ghuva::f32 target_tps             = 120.0f;
+        ghuva::f32 target_time_multiplier = 1.0f;
+        bool parallel_ticking             = true;
+
+        bool engine_has_dedicated_thread  = true;
     } outputs;
 
     app();
@@ -123,21 +132,10 @@ private:
         };
         std::vector<mesh_data> geometry_offsets; // Where each mesh sits within the buffer.
 
-        ghuva::u8* buffer      = nullptr; // Contains all the geometry buffers.
-        ghuva::u64 buffer_size = 0;
-
-        // Point places within data.
-        ghuva::u8* position_start = nullptr;
-        ghuva::u8* color_start    = nullptr;
-        ghuva::u8* normal_start   = nullptr;
-        ghuva::u8* index_start    = nullptr;
-
-        // The sizes of the individual buffers (position, color, normal, index), in bytes.
-        ghuva::u64 vertex_buf_size   = 0;
-        ghuva::u64 index_buf_size    = 0;
-
-        // The instance buffer is separate since meshes seldom change, while objects often do.
-        ghuva::u8* instance_buffer   = nullptr;
-        ghuva::u64 instance_buf_size = 0;
+        // Contains position + color + normal buffers. Divide size by 3 to get the offsets
+        // for each buffer within this.
+        ghuva::container<ghuva::context::vertex_t> geometry_buffer;
+        ghuva::container<ghuva::context::index_t>  index_buffer;
+        ghuva::container<ghuva::context::object_uniforms> instance_buffer;
     } scene;
 };

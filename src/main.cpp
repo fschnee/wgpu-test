@@ -1,12 +1,14 @@
 #include <fmt/core.h>
 
-#include <vector>
-#include <thread>
 #include <atomic>
+#include <random>
+#include <thread>
+#include <vector>
 
 // Unused for now.
 //#include <rapidobj/rapidobj.hpp>
 
+#include "ghuva/meshes/pyramid.hpp"
 #include "ghuva/objects/eel.hpp"
 #include "ghuva/objects/ew.hpp"
 #include "ghuva/utils/math.hpp"
@@ -22,9 +24,11 @@ struct userdata
 {
     using engine_t = g::default_engine;
 
-    engine_t engine       = engine_t{};
-    std::atomic_bool exit = false; // Flag to exit the engine_thread.
+    engine_t engine          = engine_t{};
+    std::atomic_bool exit    = true;  // Flag to exit the engine_thread.
+    std::atomic_bool ticking = false; // Flag to tell whether or not engine_thread is alive.
     std::jthread engine_thread; // The thread actually doing the ticking.
+    g::chrono::default_stopwatch engine_stopwatch = g::chrono::stopwatch{};
 
     u64 last_snapshot_tick = 0; // To keep track of how many ticks elapsed.
 
@@ -32,8 +36,11 @@ struct userdata
     std::vector<app::object> rendered_objs;
     std::vector<g::mesh>     meshes;
 
+    auto engine_tick(bool dedicated_thread) -> void;
     auto engine_load_scene() -> void;
-    auto engine_start_ticking() -> void;
+
+private:
+    auto engine_thread_start_ticking() -> void;
 };
 
 int main()
@@ -46,40 +53,47 @@ int main()
 
     auto ud = ::userdata{};
     ud.engine_load_scene();
-    ud.engine_start_ticking();
 
     app.loop(&ud, [](::app& app, [[maybe_unused]] f32 dt, auto* _ud)
     {
         auto& ud      = *(_ud * g::cvt::rc<userdata*>);
         // TODO: query only the snapshot id, if new_id > ud.last_snapshot_id we actually take it.
-        auto snapshot = ud.engine.take_snapshot(); // Take a copy of the latest snapshot.
 
+        // We communicate engine config updates first otherwise they may be lost between ticks.
         if(app.outputs.do_engine_config_update)
         {
             fmt::print(
-                "[main] Requesting Engine to update time_multiplier to {} and tps to {}\n",
+                "[main] Requesting Engine to update time_multiplier to {}, tps to {} and parallel_ticking to {}\n",
                 app.outputs.target_time_multiplier,
-                app.outputs.target_tps
+                app.outputs.target_tps,
+                app.outputs.parallel_ticking
             );
 
             using e = userdata::engine_t;
 
             ud.engine.post(e::set_time_multiplier{ .time_multiplier = app.outputs.target_time_multiplier });
             ud.engine.post(e::set_tps{ .tps = app.outputs.target_tps });
+            ud.engine.post(e::set_parallel_ticking{ .parallel_ticking = app.outputs.parallel_ticking });
         }
+
+        ud.engine_tick(app.outputs.engine_has_dedicated_thread);
+        auto snapshot = ud.engine.take_snapshot(); // Take a copy of the latest snapshot.
 
         // Early return if nothing changed.
         if(snapshot.id == ud.last_snapshot_tick) return g::context::loop_message::do_continue;
 
         // Otherwise we set the params according to what we've got.
-        app.params.engine = {
-            .total_time      = snapshot.engine_config.total_time,
-            .tps             = snapshot.engine_config.ticks_per_second,
-            .time_multiplier = snapshot.engine_config.time_multiplier,
-            .max_tps         = 100'000.f,
-            .ticks           = snapshot.id - ud.last_snapshot_tick,
-        };
 
+        app.params.engine = {
+            .total_time       = snapshot.engine_config.total_time,
+            .tps              = snapshot.engine_config.ticks_per_second,
+            .time_multiplier  = snapshot.engine_config.time_multiplier,
+            .max_tps          = 100'000.f,
+            .ticks            = snapshot.id - ud.last_snapshot_tick,
+            .parallel_ticking = snapshot.engine_config.parallel_ticking,
+
+            .has_own_thread = ud.ticking,
+        };
         ud.meshes             = ghuva::move(snapshot.meshes); // It's fine to steal, the snapshot is a copy.
         app.params.meshes     = ud.meshes.data();
         app.params.mesh_count = ud.meshes.size();
@@ -118,10 +132,6 @@ auto userdata::engine_load_scene() -> void
 
     auto const camera_post_id = engine.post(engine_t::register_object{ .object = {{
         .name = "Camera",
-        .t = {
-            .pos = {0.0, 0.0, 2.0},
-            .rot = {-3.0f * M_PI / 4.0f, 0.0f, 0.0f},
-        },
         .on_tick =
             [
                 t = 0.0f,
@@ -157,28 +167,16 @@ auto userdata::engine_load_scene() -> void
     }}});
     fmt::print("[main.load_scene] Requested engine to register Camera {{ .event_id = {} }}\n", camera_post_id);
 
-    auto const pyramid_mesh_post_id = engine.post(engine_t::register_mesh{ .mesh = {
-        .id = 0,
-        .vertexes = { -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.0, +0.0, +0.5, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, +0.0, +0.0, +0.5, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, +0.0, +0.0, +0.5, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.0, +0.0, +0.5 },
-        .colors  = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 },
-        .normals = { 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53 },
-        .indexes  = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
-    }});
+    auto const pyramid_mesh_post_id = engine.post(engine_t::register_mesh{ ghuva::meshes::pyramid });
     fmt::print("[main.load_scene] Requested engine to register pyramid_mesh {{ .event_id = {} }}\n", pyramid_mesh_post_id);
 
     // Other pyramids, just to have more data on the engine.
     for(auto i = 0_u64; i < 10; ++i)
-        engine.post(engine_t::register_mesh{ .mesh = {
-            .id = 0,
-            .vertexes = { -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.5, -0.5, -0.3, +0.0, +0.0, +0.5, +0.5, -0.5, -0.3, +0.5, +0.5, -0.3, +0.0, +0.0, +0.5, +0.5, +0.5, -0.3, -0.5, +0.5, -0.3, +0.0, +0.0, +0.5, -0.5, +0.5, -0.3, -0.5, -0.5, -0.3, +0.0, +0.0, +0.5 },
-            .colors  = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 },
-            .normals = { 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.0, -0.848, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.848, 0.0, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, 0.0, 0.848, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53, -0.848, 0.0, 0.53 },
-            .indexes  = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
-        }});
+        engine.post(engine_t::register_mesh{ ghuva::meshes::pyramid });
 
     // Our pyramid loader will wait for the (original) mesh to be registered to get it's id.
     auto const ew_post_id = engine.post(engine_t::register_object{ g::objects::make_ew<engine_t>(pyramid_mesh_post_id, [](
-        auto const& _e, auto, auto const& snapshot, auto& engine
+        auto const& _e, auto, auto const&, auto& engine
     ){
         // Due to EW checking all event types we need to tell the compiler exactly what kind of event this is.
         // In this situation we know the event type (posted it just above), but in the middle of game code
@@ -186,54 +184,73 @@ auto userdata::engine_load_scene() -> void
         // TODO: EW for single event type -> add template param.
         auto const& e = _e * g::cvt::rc<engine_t::e_register_mesh const&>;
         auto const mesh_id = e.body.mesh.id;
-        auto const p1eid = engine.post(engine_t::register_object{ .object = {{
-            .name = "Pyramid",
-            .t = { .pos = {-1.5, 0.0f, -1.0f} },
-            .on_tick = [](auto& self, auto dt, auto const&, auto&) { self.t.rot.z += dt; },
-            .mesh_id = mesh_id,
-        }}});
-        fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid {{ .event_id={} }}\n", snapshot.id, p1eid);
-        auto const p2eid = engine.post(engine_t::register_object{ .object = {{
-            .name = "Pyramid 2",
-            .t = {
-                .pos = {0.5f, 0.0f, 0.0f},
-                .scale = {0.3f, 0.3f, 0.3f},
-            },
-            .on_tick = [](auto& self, auto dt, auto const&, auto&) { self.t.rot.z += dt; },
-            .mesh_id = mesh_id,
-        }}});
-        fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid 2 {{ .event_id={} }}\n", snapshot.id, p2eid);
 
-        auto const p3eid = engine.post(engine_t::register_object{ .object = {{
-            .name = "Pyramid 3 (in origin)",
-            .t = { .scale = {0.4f, 0.4f, 0.4f } },
-            .mesh_id = mesh_id,
-        }}});
-        fmt::print("[ghuva::engine/t{}][main.load_scene] Requested engine to register Pyramid 3 {{ .event_id={} }}\n", snapshot.id, p3eid);
+        engine.post(engine_t::register_object{ .object = {{
+            .name = "Pyramid loader",
+            .on_tick = [
+                mesh_id,
+                gen   = std::default_random_engine{},
+                xposdist  = std::uniform_real_distribution<f32>(-8.0, 8.0),
+                yposdist  = std::uniform_real_distribution<f32>(-8.0, 8.0),
+                zposdist  = std::uniform_real_distribution<f32>(1.0, 9.0),
+                rotdist   = std::uniform_real_distribution<f32>(-3.1415, 3.1415),
+                remaining = 16'000_u64
+            ](auto&, auto, auto const& snapshot, auto& engine) mutable
+            {
+                if(remaining <= 0) return;
 
-        #if 1
-        fmt::print("requesting a bunch-a pyramids, hold on\n");
-        for(auto i = 0_u64; i < 80'000; ++i)
-            engine.post(engine_t::register_object{ .object = {{
-                .name = "Pyramid 2",
-                .t = {
-                    .pos = {0.5f, 0.0f, 0.0f},
-                    .scale = {0.3f, 0.3f, 0.3f},
-                },
-                .on_tick = [](auto& self, auto dt, auto const&, auto&) { self.t.rot.z += dt; },
-                .mesh_id = mesh_id,
-            }}});
-        #endif
+                engine.post(engine_t::register_object{ .object{{
+                    .name = "Pyramid",
+                    .t = {
+                        .pos   = {xposdist(gen),  yposdist(gen),  zposdist(gen)},
+                        .rot   = {rotdist(gen),   rotdist(gen),   rotdist(gen)},
+                        .scale = {0.1f,           0.1f,           0.1f},
+                    },
+                    .on_tick = [remaining](auto& self, auto dt, auto const&, auto&) { self.t.rot[remaining % 3] += dt; },
+                    .mesh_id = mesh_id,
+                }}});
+                fmt::print("[ghuva::engine/t{}][main.load_scene.pyramid_loader] Requested engine to register Pyramid\n", snapshot.id);
+
+                --remaining;
+            }
+        }}});
     })});
     fmt::print("[main.load_scene] Requested engine to register EW for {{ .event_id = {} }}\n", ew_post_id);
 }
 
-auto userdata::engine_start_ticking() -> void
+auto userdata::engine_tick(bool dedicated_thread) -> void
 {
-    engine_thread = std::jthread{
-        [this, stopwatch = g::chrono::stopwatch()]() mutable
-        {
-            while(!exit) engine.tick(stopwatch.click().last_segment());
-        }
-    };
+    bool const requested_exit = exit;
+    bool const exited = !ticking;
+
+    auto const is_alive = !requested_exit && !exited;
+    auto const crashed  = !requested_exit && exited; // *Should* be impossible.
+    auto const is_dying = requested_exit && !exited;
+    auto const is_dead  = requested_exit && exited;
+
+    auto const start_thread    = dedicated_thread && is_dead;
+    auto const continue_thread = dedicated_thread && is_alive;
+    auto const tick_myself  = !dedicated_thread && is_dead;
+    auto const request_exit = !dedicated_thread && is_alive;
+    auto const wait_exit    = !dedicated_thread && is_dying;
+
+         if(start_thread)    { fmt::print("[main] Requested engine_thread to start ticking.\n"); engine_thread_start_ticking(); }
+    else if(crashed)         { fmt::print("[main] engine_thread crashed, asked to restart\n");   engine_thread_start_ticking(); }
+    else if(continue_thread) { /* fmt::print("[main] engine_thread is ticking\n"); */ }
+    else if(tick_myself)     { engine.tick(engine_stopwatch.click().last_segment()); }
+    else if(request_exit)    { exit = true; fmt::print("[main] Requested engine_thread to stop ticking.\n"); }
+    else if(wait_exit)       { fmt::print("[main] engine_thread is dying, waiting to take over ticking.\n"); }
+}
+
+auto userdata::engine_thread_start_ticking() -> void
+{
+    exit = false;
+    ticking = true;
+    engine_thread = std::jthread{ [this]() {
+        fmt::print("[engine_thread] Starting\n");
+        // TODO: sleep between ticks.
+        while(!this->exit) engine.tick(this->engine_stopwatch.click().last_segment());
+        fmt::print("[engine_thread] Exiting\n");
+        this->ticking = false;
+    }};
 }

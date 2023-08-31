@@ -1,5 +1,6 @@
 #pragma once
 
+#include "utils/guarded.hpp"
 #include "utils/chrono.hpp"
 #include "utils/aliases.hpp"
 #include "utils/forward.hpp"
@@ -82,6 +83,11 @@ namespace ghuva
     template <typename T> constexpr auto is_event_v = is_event<T>::value;
 
     // TODO: how do I make ordering for this deterministic ?
+    // NOTE: If parallel_ticking == false this will already be deterministic.
+    //       However, if parallel_ticking we want to have each thread have its own postboard
+    //       and at the end of ticking we merge them all sequentially.
+    //       Basically, tick in chunks, keep a chunk id, then order based on chunkid THEN messageid
+    //       and use that final ordering to produce the final id.
     template <typename T>
     struct message
     {
@@ -91,6 +97,12 @@ namespace ghuva
         u64 source_object_id; // 0 = engine/external/unidentified events.
         u64 posted_at_tick;
         body_t body;
+
+    private:
+        // TODO: we can refactor this out of here probably.
+        //u64 chunk_id;
+        //u64 chunk_message_id;
+        //friend class engine;
     };
     template <typename T> struct is_message               { static constexpr bool value = false; };
     template <typename T> struct is_message< message<T> > { static constexpr bool value = true; };
@@ -131,6 +143,8 @@ namespace ghuva
 
         f32 total_time = 0.0f;
 
+        bool parallel_ticking = true;
+
         u64 last_mesh_id = 1;
         u64 last_object_id = 1;
         u64 last_event_id = 1;
@@ -160,18 +174,20 @@ namespace ghuva
         using object_t = ghuva::object<engine>; // CRTP this bitch.
 
         // Some engine events.
-        struct register_mesh       { ghuva::mesh mesh; /* Id is overriden */ };
-        struct register_object     { object_t object; /* Id is overriden. */ };
-        struct delete_object       { u64 id; bool success; };
-        struct set_tps             { f32 tps; };
-        struct set_camera          { u64 object_id; };
-        struct set_time_multiplier { f32 time_multiplier; };
-        using  e_register_mesh       = ghuva::event< register_mesh >;
-        using  e_register_object     = ghuva::event< register_object >;
-        using  e_delete_object       = ghuva::event< delete_object >;
-        using  e_set_tps             = ghuva::event< set_tps >;
-        using  e_set_camera          = ghuva::event< set_camera >;
-        using  e_set_time_multiplier = ghuva::event< set_time_multiplier >;
+        struct register_mesh        { ghuva::mesh mesh; /* Id is overriden */ };
+        struct register_object      { object_t object; /* Id is overriden. */ };
+        struct delete_object        { u64 id; bool success; };
+        struct set_tps              { f32 tps; };
+        struct set_camera           { u64 object_id; };
+        struct set_time_multiplier  { f32 time_multiplier; };
+        struct set_parallel_ticking { bool parallel_ticking; };
+        using  e_register_mesh        = ghuva::event< register_mesh >;
+        using  e_register_object      = ghuva::event< register_object >;
+        using  e_delete_object        = ghuva::event< delete_object >;
+        using  e_set_tps              = ghuva::event< set_tps >;
+        using  e_set_camera           = ghuva::event< set_camera >;
+        using  e_set_time_multiplier  = ghuva::event< set_time_multiplier >;
+        using  e_set_parallel_ticking = ghuva::event< set_parallel_ticking >;
 
         using default_events = impl::type_list<
             e_register_mesh,
@@ -179,7 +195,8 @@ namespace ghuva
             e_delete_object,
             e_set_tps,
             e_set_camera,
-            e_set_time_multiplier
+            e_set_time_multiplier,
+            e_set_parallel_ticking
         >;
         using extra_events   = ExtraPostboardEvents;
         using events         = impl::tlist_merge< default_events, extra_events >::type;
@@ -246,12 +263,10 @@ namespace ghuva
 
     private:
         // TODO: snapshot keepalive system ?
-        mutable std::shared_mutex last_snapshot_mutex;
-        snapshot last_snapshot;
-        mutable std::shared_mutex partial_snapshot_mutex;
-        snapshot partial_snapshot; // Postboard of this one and
-                                   // other stuff are filled in
-                                   // as we tick the current snapshot.
+        guarded<snapshot> last_snapshot;
+        guarded<snapshot> partial_snapshot; // Postboard of this one and
+                                            // other stuff are filled in
+                                            // as we tick the current snapshot.
 
         constexpr auto fixed_tick(f32 dt) -> void;
     };
@@ -266,10 +281,9 @@ constexpr auto ghuva::engine<T, T2>::take_snapshot() -> snapshot
 {
     snapshot temp;
 
-    {
-        std::shared_lock lock(this->last_snapshot_mutex);
-        temp = this->last_snapshot;
-    }
+    last_snapshot.read([&](auto const& s){
+        temp = s;
+    });
 
     return temp;
 }
@@ -279,34 +293,38 @@ constexpr auto ghuva::engine<T, T2>::tick(f32 real_dt) -> u64
 {
     f32 dt;
     f32 leftover_tick_seconds;
-    {
-        std::unique_lock lock(this->partial_snapshot_mutex);
-        dt = real_dt * this->partial_snapshot.engine_config.time_multiplier;
-        this->partial_snapshot.engine_config.leftover_tick_seconds += dt;
-        leftover_tick_seconds = this->partial_snapshot.engine_config.leftover_tick_seconds;
-    }
 
-    const auto start_tick = this->last_snapshot.id;
+    partial_snapshot.write([&](auto& p) {
+        dt = real_dt * p.engine_config.time_multiplier;
+        p.engine_config.leftover_tick_seconds += dt;
+        leftover_tick_seconds = p.engine_config.leftover_tick_seconds;
+    });
+
+    u64 start_tick;
+    last_snapshot.read([&](auto const& l){
+        start_tick = l.id;
+    });
 
     while(true)
     {
-        f32 seconds_per_tick;
-        {
-            std::shared_lock lock(this->last_snapshot_mutex);
-            seconds_per_tick = 1.0f / this->last_snapshot.engine_config.ticks_per_second;
-        }
+        auto seconds_per_tick = last_snapshot.read([&](auto const& l){
+            return 1.0f / l.engine_config.ticks_per_second;
+        });
         if(leftover_tick_seconds < seconds_per_tick) break;
 
         this->fixed_tick(seconds_per_tick);
 
-        {
-            std::unique_lock lock(this->partial_snapshot_mutex);
-            this->partial_snapshot.engine_config.leftover_tick_seconds -= seconds_per_tick;
-        }
+        partial_snapshot.write([&](auto& p){
+            p.engine_config.leftover_tick_seconds -= seconds_per_tick;
+        });
         leftover_tick_seconds -= seconds_per_tick;
     }
 
-    return this->last_snapshot.id - start_tick;
+    u64 last_id;
+    last_snapshot.read([&](auto const& l){
+        last_id = l.id;
+    });
+    return last_id - start_tick;
 }
 
 template <typename T, typename T2>
@@ -320,33 +338,33 @@ constexpr auto ghuva::engine<T, T2>::fixed_tick(f32 dt) -> void
     u64                   last_snapshot_camera_object_id;
     f32                   last_snapshot_total_time;
     std::vector<mesh>     last_snapshot_meshes;
-    {
-        std::shared_lock lock(this->last_snapshot_mutex);
-        last_snapshot_id               = this->last_snapshot.id;
+
+    last_snapshot.read([&](auto const& l){
+        last_snapshot_id          = l.id;
         copy_objects_time = ghuva::chrono::time([&]{
-            last_snapshot_objects      = this->last_snapshot.objects;
+            last_snapshot_objects = l.objects;
         });
-        last_snapshot_camera_object_id = this->last_snapshot.camera_object_id;
-        last_snapshot_total_time       = this->last_snapshot.engine_config.total_time;
-        last_snapshot_meshes           = this->last_snapshot.meshes;
-    }
+        last_snapshot_camera_object_id = l.camera_object_id;
+        last_snapshot_total_time       = l.engine_config.total_time;
+        last_snapshot_meshes           = l.meshes;
+    });
 
     snapshot temp; // Used just before ticking.
-    {
-        std::unique_lock lock(this->partial_snapshot_mutex);
-        this->partial_snapshot.engine_config.total_time = last_snapshot_total_time + dt;
-        this->partial_snapshot.id                       = last_snapshot_id + 1;
-        this->partial_snapshot.engine_perf.copy_objects = copy_objects_time + ghuva::chrono::time([&]{
-            this->partial_snapshot.objects              = ghuva::move(last_snapshot_objects);
+
+    partial_snapshot.write([&](auto& p){
+        p.engine_config.total_time = last_snapshot_total_time + dt;
+        p.id                       = last_snapshot_id + 1;
+        p.engine_perf.copy_objects = copy_objects_time + ghuva::chrono::time([&]{
+            p.objects              = ghuva::move(last_snapshot_objects);
         });
-        this->partial_snapshot.camera_object_id         = last_snapshot_camera_object_id;
-        this->partial_snapshot.meshes                   = ghuva::move(last_snapshot_meshes);
+        p.camera_object_id         = last_snapshot_camera_object_id;
+        p.meshes                   = ghuva::move(last_snapshot_meshes);
 
         // Run the engine event handlers.
         auto engine_events_stopwatch = ghuva::chrono::stopwatch();
-        this->partial_snapshot.engine_perf.delete_objects = ghuva::chrono::time([&]{
-            this->partial_snapshot.template on_post<e_delete_object>([&](auto& e){
-                auto& objs = this->partial_snapshot.objects;
+        p.engine_perf.delete_objects = ghuva::chrono::time([&]{
+            p.template on_post<e_delete_object>([&](auto& e){
+                auto& objs = p.objects;
                 auto  pos  = std::find_if(objs.begin(), objs.end(), [&](auto obj){ return obj.id == e.body.id; });
 
                 if(pos != objs.end())
@@ -357,53 +375,63 @@ constexpr auto ghuva::engine<T, T2>::fixed_tick(f32 dt) -> void
                 else { e.body.success = false; }
             });
         });
-        this->partial_snapshot.engine_perf.register_objects = ghuva::chrono::time([&]{
-            this->partial_snapshot.template on_post<e_register_object>([&](auto& e){
+        p.engine_perf.register_objects = ghuva::chrono::time([&]{
+            p.template on_post<e_register_object>([&](auto& e){
                 auto& o = e.body.object;
-                o.id = this->partial_snapshot.engine_config.last_object_id++;
-                this->partial_snapshot.objects.push_back(o);
+                o.id = p.engine_config.last_object_id++;
+                p.objects.push_back(o);
             });
         });
-        this->partial_snapshot.engine_perf.register_meshes = ghuva::chrono::time([&]{
-            this->partial_snapshot.template on_post<e_register_mesh>([&](auto& e){
+        p.engine_perf.register_meshes = ghuva::chrono::time([&]{
+            p.template on_post<e_register_mesh>([&](auto& e){
                 auto& m = e.body.mesh;
-                m.id = this->partial_snapshot.engine_config.last_mesh_id++;
-                this->partial_snapshot.meshes.push_back(m);
+                m.id = p.engine_config.last_mesh_id++;
+                p.meshes.push_back(m);
             });
         });
-        this->partial_snapshot.template on_post<e_set_tps>([&](auto& e){
-            this->partial_snapshot.engine_config.ticks_per_second = e.body.tps;
+        p.template on_post<e_set_tps>([&](auto& e){
+            p.engine_config.ticks_per_second = e.body.tps;
         });
-        this->partial_snapshot.template on_post<e_set_camera>([&](auto& e){
-            this->partial_snapshot.camera_object_id = e.body.object_id;
+        p.template on_post<e_set_camera>([&](auto& e){
+            p.camera_object_id = e.body.object_id;
         });
-        this->partial_snapshot.template on_post<e_set_time_multiplier>([&](auto& e){
-            this->partial_snapshot.engine_config.time_multiplier = e.body.time_multiplier;
+        p.template on_post<e_set_time_multiplier>([&](auto& e){
+            p.engine_config.time_multiplier = e.body.time_multiplier;
         });
-        this->partial_snapshot.engine_perf.engine_events = engine_events_stopwatch.click().last_segment();
+        p.template on_post<e_set_parallel_ticking>([&](auto& e){
+            p.engine_config.parallel_ticking = e.body.parallel_ticking;
+        });
+        p.engine_perf.engine_events = engine_events_stopwatch.click().last_segment();
 
         // TODO: order messages by receiver_object_id before ticking for easier message vector management.
-        //this->partial_snapshot.messageboard;
+        //p.messageboard;
 
-        temp = ghuva::move(this->partial_snapshot);
-        this->partial_snapshot = snapshot{};
-        this->partial_snapshot.engine_config = temp.engine_config;
-    }
+        temp = ghuva::move(p);
+        p = snapshot{};
+        p.engine_config = temp.engine_config;
+    });
 
     // Do the tick proper.
     temp.engine_perf.object_ticks = ghuva::chrono::time([&]{
-        // TODO: omp overhead too big. Threadpool witch batching ?
-        for(auto& obj : temp.objects) if(obj.tick) obj.on_tick(obj, dt, temp, *this);
+        // TODO: omp overhead too big. Threadpool with batching ?
+        if(temp.engine_config.parallel_ticking)
+        {
+            #pragma omp parallel for
+            for(auto& obj : temp.objects) if(obj.tick) obj.on_tick(obj, dt, temp, *this);
+        }
+        else
+        {
+            for(auto& obj : temp.objects) if(obj.tick) obj.on_tick(obj, dt, temp, *this);
+        }
     });
 
     // Then set this snapshot in stone.
-    {
-        std::unique_lock lock(this->last_snapshot_mutex);
-        auto commit_stopwatch                      = ghuva::chrono::stopwatch();
-        this->last_snapshot                        = ghuva::move(temp);
-        this->last_snapshot.engine_perf.commit     = commit_stopwatch.click().last_segment();
-        this->last_snapshot.engine_perf.fixed_tick = fixed_tick_stopwatch.click().last_segment();
-    }
+    last_snapshot.write([&](auto& l){
+        auto commit_stopwatch    = ghuva::chrono::stopwatch();
+        l                        = ghuva::move(temp);
+        l.engine_perf.commit     = commit_stopwatch.click().last_segment();
+        l.engine_perf.fixed_tick = fixed_tick_stopwatch.click().last_segment();
+    });
 }
 
 template <typename T, typename T2>
@@ -414,20 +442,22 @@ constexpr auto ghuva::engine<T, T2>::post(E&& event, u64 source_id) -> u64
 
     if constexpr(engine::postboard_t::template supports<Event>)
     {
-        u64 last_id;
-        {
-            std::shared_lock lock(this->last_snapshot_mutex);
-            last_id = this->last_snapshot.id;
-        }
-
-        std::unique_lock lock(this->partial_snapshot_mutex);
-        this->partial_snapshot.postboard.template get< Event >().push_back({
-            .id = this->partial_snapshot.engine_config.last_event_id++,
-            .source_object_id = source_id,
-            .posted_at_tick = last_id,
-            .body = ghuva::forward<E>(event)
+        u64 last_tick_id;
+        last_snapshot.read([&](auto const& l) {
+            last_tick_id = l.id;
         });
-        return this->partial_snapshot.engine_config.last_event_id - 1;
+
+        u64 ret;
+        partial_snapshot.write([&](auto& p){
+            p.postboard.template get< Event >().push_back({
+                .id = p.engine_config.last_event_id,
+                .source_object_id = source_id,
+                .posted_at_tick = last_tick_id,
+                .body = ghuva::forward<E>(event)
+            });
+            ret = p.engine_config.last_event_id++;
+        });
+        return ret;
     }
     else { return 0; }
 }
@@ -441,20 +471,22 @@ constexpr auto ghuva::engine<T, T2>::message(M&& message, u64 target_id, u64 sou
     if constexpr(engine::messageboard_t::template supports<Message>)
     {
         u64 last_id;
-        {
-            std::shared_lock lock(this->last_snapshot_mutex);
-            last_id = this->last_snapshot.id;
-        }
-
-        std::unique_lock lock(this->partial_snapshot_mutex);
-        this->partial_snapshot.messageboard.template get< Message >().push_back({
-            .id = this->partial_snapshot.engine_config.last_message_id++,
-            .target_object_id = target_id,
-            .source_object_id = source_id,
-            .posted_at_tick = last_id,
-            .body = ghuva::forward<M>(message)
+        last_snapshot.read([&](auto const& l){
+            last_id = l.id;
         });
-        return this->partial_snapshot.engine_config.last_event_id - 1;
+
+        u64 ret;
+        partial_snapshot.write([&](auto& p){
+            p.messageboard.template get< Message >().push_back({
+                .id = p.engine_config.last_message_id,
+                .target_object_id = target_id,
+                .source_object_id = source_id,
+                .posted_at_tick = last_id,
+                .body = ghuva::forward<M>(message)
+            });
+            ret = p.engine_config.last_message_id++;
+        });
+        return ret;
     }
     else { return 0; }
 }

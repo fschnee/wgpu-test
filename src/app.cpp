@@ -3,6 +3,7 @@
 #include <algorithm> // std::find_if.
 #include <cstring> // std::memcpy.
 
+#include "ghuva/utils/list.hpp"
 #include "ghuva/utils.hpp"
 #include "ghuva/mesh.hpp"
 
@@ -20,7 +21,9 @@ app::app()
 
 app::~app()
 {
-    if(scene.buffer != nullptr) delete[] scene.buffer;
+    if(scene.geometry_buffer.data != nullptr) delete scene.geometry_buffer.data;
+    if(scene.instance_buffer.data != nullptr) delete scene.instance_buffer.data;
+    if(scene.index_buffer.data    != nullptr) delete scene.index_buffer.data;
 }
 
 auto app::init() -> void
@@ -73,6 +76,7 @@ auto app::sync_params_to_outputs() -> void
     outputs.do_engine_config_update = false;
     outputs.target_tps              = params.engine.tps;
     outputs.target_time_multiplier  = params.engine.time_multiplier;
+    outputs.parallel_ticking        = params.engine.parallel_ticking;
 }
 
 auto app::write_scene_uniform() -> void
@@ -129,58 +133,53 @@ auto app::build_scene_geometry() -> void
         curr_vertex += mesh.vertexes.size() / 3;
     }
 
-    auto const idx_count    = curr_idx;
-    scene.index_buf_size    = idx_count * sizeof(ghuva::context::index_t);
+    scene.index_buffer = ghuva::list<ghuva::context::index_t>
+        ::from_container( ghuva::move(scene.index_buffer) )
+        .reserve_nocopy(curr_idx)
+        .override_size(curr_idx)
+        .surrender();
+
     auto const vertex_count = curr_vertex * 3; // * 3 since each buffer has 3 elements per vertex
                                                // (pos has x,y,z; color has r,g,b; normal has nx,ny,nz).
-    scene.vertex_buf_size   = vertex_count * sizeof(ghuva::context::vertex_t);
+    auto const geometry_buf_size = vertex_count * 3; // * 3 since there are 3 buffers (position, color, normals).
+    scene.geometry_buffer = ghuva::list<ghuva::context::vertex_t>
+        ::from_container( ghuva::move(scene.geometry_buffer) )
+        .reserve_nocopy(geometry_buf_size)
+        .override_size(geometry_buf_size)
+        .surrender();
 
-    auto const data_size = scene.vertex_buf_size * 3 + scene.index_buf_size; // * 3 since there are 3 buffers (position, color, normals).
+    // Copy all the mesh data into our buffers.
+    auto const position_start = scene.geometry_buffer.data;
+    auto const color_start    = position_start + scene.geometry_buffer.size / 3;
+    auto const normal_start   = color_start    + scene.geometry_buffer.size / 3;
+    auto const index_start    = scene.index_buffer.data;
 
-    // Allocate this big ass bitch (if necessary).
-    if(scene.buffer == nullptr || data_size > scene.buffer_size)
-    {
-        fmt::print("[app] Allocating/Reallocating scene geometry buffer to size {} bytes\n", data_size);
-        scene.buffer_size = data_size;
-        delete[] scene.buffer;
-        scene.buffer = new u8[scene.buffer_size];
-    }
-
-    // And fix the pointers.
-    scene.position_start = scene.buffer;
-    scene.color_start    = scene.position_start + scene.vertex_buf_size;
-    scene.normal_start   = scene.color_start    + scene.vertex_buf_size;
-    scene.index_start    = scene.normal_start   + scene.vertex_buf_size;
-
-    // Copy all the mesh data into our big buffer.
-    auto index_offset  = 0_u64;
     auto vertex_offset = 0_u64;
+    auto index_offset  = 0_u64;
     for(auto i = 0_u64; i < params.mesh_count; ++i)
     {
         auto const& mesh = params.meshes[i];
 
-        auto const vertex_walk = mesh.vertexes.size() * sizeof(ghuva::context::vertex_t);
-        auto const index_walk  = mesh.indexes.size()  * sizeof(ghuva::context::index_t);
+        auto const vertex_bsize = mesh.vertexes.size() * sizeof(ghuva::context::vertex_t);
+        auto const index_bsize  = mesh.indexes.size()  * sizeof(ghuva::context::index_t);
 
-        std::memcpy(scene.position_start + vertex_offset, mesh.vertexes.data(), vertex_walk);
-        std::memcpy(scene.color_start    + vertex_offset, mesh.colors.data(),   vertex_walk);
-        std::memcpy(scene.normal_start   + vertex_offset, mesh.normals.data(),  vertex_walk);
-        std::memcpy(scene.index_start    + index_offset,  mesh.indexes.data(),  index_walk);
+        std::memcpy(position_start + vertex_offset, mesh.vertexes.data(), vertex_bsize);
+        std::memcpy(color_start    + vertex_offset, mesh.colors.data(),   vertex_bsize);
+        std::memcpy(normal_start   + vertex_offset, mesh.normals.data(),  vertex_bsize);
+        std::memcpy(index_start    + index_offset,  mesh.indexes.data(),  index_bsize);
 
-        vertex_offset += vertex_walk;
-        index_offset  += index_walk;
+        vertex_offset += mesh.vertexes.size();
+        index_offset  += mesh.indexes.size();
     }
 
     // And finally, build our instancing buffer.
     if(params.object_count == 0) return;
 
-    scene.instance_buf_size = params.object_count * ctx.object_uniform_stride;
-    if(scene.instance_buffer == nullptr || data_size > scene.buffer_size)
-    {
-        fmt::print("[app] Allocating/Reallocating scene instancing buffer to size {} bytes\n", scene.instance_buf_size);
-        delete[] scene.instance_buffer;
-        scene.instance_buffer = new u8[scene.instance_buf_size];
-    }
+    scene.instance_buffer = ghuva::list<ghuva::context::object_uniforms>
+        ::from_container( ghuva::move(scene.instance_buffer) )
+        .reserve_nocopy(params.object_count)
+        .override_size(params.object_count)
+        .surrender();
 
     std::sort(
         params.objects,
@@ -197,7 +196,7 @@ auto app::build_scene_geometry() -> void
 
         ++scene.geometry_offsets[last_mesh_index].instance_count;
 
-        auto const offset = scene.instance_buffer + i * sizeof(ghuva::context::object_uniforms);
+        auto const offset = scene.instance_buffer.data + i;
         if(compute_pass)
         {
             new (offset) ghuva::context::compute_object_uniforms{
@@ -221,15 +220,20 @@ auto app::build_scene_geometry() -> void
 
 auto app::write_geometry_buffers() -> void
 {
-    if(scene.buffer == nullptr || scene.buffer_size == 0) return;
+    if(scene.geometry_buffer.data == nullptr || scene.geometry_buffer.size == 0) return;
 
-    ctx.device.getQueue().writeBuffer(ctx.vertex_buffer,         0, scene.position_start,  scene.vertex_buf_size);
-    ctx.device.getQueue().writeBuffer(ctx.color_buffer,          0, scene.color_start,     scene.vertex_buf_size);
-    ctx.device.getQueue().writeBuffer(ctx.normal_buffer,         0, scene.normal_start,    scene.vertex_buf_size);
-    ctx.device.getQueue().writeBuffer(ctx.index_buffer,          0, scene.index_start,     scene.index_buf_size);
+    auto const position_start = scene.geometry_buffer.data;
+    auto const color_start    = position_start + scene.geometry_buffer.size / 3;
+    auto const normal_start   = color_start    + scene.geometry_buffer.size / 3;
+    auto const index_start    = scene.index_buffer.data;
 
-    if(scene.instance_buffer == nullptr || scene.instance_buf_size == 0) return;
-    ctx.device.getQueue().writeBuffer(ctx.object_uniform_buffer, 0, scene.instance_buffer, scene.instance_buf_size);
+    ctx.device.getQueue().writeBuffer(ctx.vertex_buffer, 0, position_start,  scene.geometry_buffer.byte_size() / 3);
+    ctx.device.getQueue().writeBuffer(ctx.color_buffer,  0, color_start,     scene.geometry_buffer.byte_size() / 3);
+    ctx.device.getQueue().writeBuffer(ctx.normal_buffer, 0, normal_start,    scene.geometry_buffer.byte_size() / 3);
+    ctx.device.getQueue().writeBuffer(ctx.index_buffer,  0, index_start,     scene.index_buffer.byte_size());
+
+    if(scene.instance_buffer.data == nullptr || scene.instance_buffer.size == 0) return;
+    ctx.device.getQueue().writeBuffer(ctx.object_uniform_buffer, 0, scene.instance_buffer.data, scene.instance_buffer.byte_size());
 }
 
 auto app::do_ui(f32 dt) -> void
@@ -239,9 +243,11 @@ auto app::do_ui(f32 dt) -> void
     ImGui::BeginMainMenuBar();
     {
         auto const frame_str = fmt::format(
-            "{:.1f} FPS ({:.1f}ms) / Scene buffer = {} bytes / {} Renderables / {} Ticks - {} TPS ({:.1f}ms) / Frame {}",
+            "{:.1f} FPS ({:.1f}ms) / Scene buffers: G({}b/{}b) In({}b/{}b) Idx({}b/{}b) / {} Renderables / {} Ticks - {} TPS ({:.1f}ms) / Frame {}",
             1 / dt, dt * 1000,
-            scene.buffer_size,
+            scene.geometry_buffer.byte_size(), scene.geometry_buffer.byte_capacity(),
+            scene.index_buffer.byte_size(),    scene.index_buffer.byte_capacity(),
+            scene.instance_buffer.byte_size(), scene.instance_buffer.byte_capacity(),
             params.object_count,
             params.engine.ticks, params.engine.tps, 1 / params.engine.tps * 1000,
             ctx.frame
@@ -301,9 +307,19 @@ auto app::do_ui(f32 dt) -> void
             ImGui::EndDisabled();
 
             ImGui::NewLine();
+
             ImGui::Checkbox("Compute pass", &compute_pass);
             ImGui::SameLine();
-            ui_help("Compute the per-object transformation matrixes using a compute pass instead of doing it on the CPU.\n\nFor scenes with a lot of objects, this *should* improve performance");
+            ui_help("Whether or not to compute the per-object transformation matrixes using a compute pass instead of doing it on the CPU.\n\nFor scenes with a lot of objects, this *should* improve performance");
+
+            ImGui::Checkbox("Engine Thread", &outputs.engine_has_dedicated_thread);
+            ImGui::SameLine();
+            ui_help("Whether or not to run the engine on a dedicated thread separate of the render thread");
+
+            if(ImGui::Checkbox("Parallel ticking", &outputs.parallel_ticking))
+            { outputs.do_engine_config_update = true; }
+            ImGui::SameLine();
+            ui_help("Whether or not to use multiple threads to do object ticking");
 
             ImGui::EndMenu();
         }
@@ -436,7 +452,7 @@ auto app::ui_draw_matrix(ghuva::m4f const& m, const char* panelname, const char*
 
 auto app::compute_transform_matrix_via_compute_pass() -> void
 {
-    if(scene.instance_buffer == nullptr || scene.instance_buf_size == 0) return;
+    if(scene.instance_buffer.data == nullptr || scene.instance_buffer.size == 0) return;
 
     auto compute_pass = ctx.begin_compute();
 
@@ -464,16 +480,17 @@ auto app::render() -> ghuva::context::loop_message
 
 auto app::render_emit_draw_calls(wgpu::RenderPassEncoder render_pass) -> void
 {
-    if(scene.instance_buffer == nullptr || scene.instance_buf_size == 0) return;
-    if(scene.buffer == nullptr          || scene.buffer_size == 0)       return;
+    if(scene.geometry_buffer.data == nullptr || scene.geometry_buffer.size == 0) return;
+    if(scene.instance_buffer.data == nullptr || scene.instance_buffer.size == 0) return;
+    if(scene.index_buffer.data == nullptr    || scene.index_buffer.size == 0)    return;
 
     render_pass.setPipeline(ctx.pipeline);
     render_pass.setBindGroup(0, ctx.scene_bind_group, 0, nullptr);
-    render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, scene.vertex_buf_size);
-    render_pass.setVertexBuffer(1, ctx.color_buffer,  0, scene.vertex_buf_size);
-    render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, scene.vertex_buf_size);
-    render_pass.setVertexBuffer(3, ctx.object_uniform_buffer, 0, scene.instance_buf_size);
-    render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, scene.index_buf_size);
+    render_pass.setVertexBuffer(0, ctx.vertex_buffer, 0, scene.geometry_buffer.byte_size() / 3);
+    render_pass.setVertexBuffer(1, ctx.color_buffer,  0, scene.geometry_buffer.byte_size() / 3);
+    render_pass.setVertexBuffer(2, ctx.normal_buffer, 0, scene.geometry_buffer.byte_size() / 3);
+    render_pass.setVertexBuffer(3, ctx.object_uniform_buffer, 0, scene.instance_buffer.byte_size());
+    render_pass.setIndexBuffer(ctx.index_buffer, wgpu::IndexFormat::Uint16, 0, scene.index_buffer.byte_size());
 
     auto curr_instance = 0_u32;
     for(auto m : scene.geometry_offsets)
